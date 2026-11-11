@@ -1,0 +1,26 @@
+[Unit]
+Description=Atoms Lab web and agent worker
+After=network-online.target atoms-runner.service
+Wants=network-online.target
+
+[Service]
+User=atoms-lab
+Group=atoms-lab
+WorkingDirectory=/opt/atoms_lab/current
+EnvironmentFile=/etc/atoms-lab/app.env
+ExecStart=/opt/atoms_lab/current/atoms
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/atoms_lab/data
+MemoryMax=256M
+CPUQuota=50%
+TasksMax=96
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
