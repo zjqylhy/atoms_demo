@@ -124,18 +124,18 @@ type Usage struct {
 	Known  bool `json:"known"`
 }
 type Frame struct {
-	ID         string                     `json:"id"`
-	Role       string                     `json:"role"`
-	Goal       string                     `json:"goal"`
-	Messages   []ModelMessage             `json:"messages"`
-	Complete   bool                       `json:"complete"`
-	Result     string                     `json:"result,omitempty"`
-	Context    *ContextSummary            `json:"context_summary,omitempty"`
-	Dialogue   *DialogueSummary           `json:"dialogue_summary,omitempty"`
-	Materials  map[string]WorkingMaterial `json:"materials,omitempty"`
-	Delegation *Delegation                `json:"delegation,omitempty"`
-	Outcome    *DelegationResult          `json:"outcome,omitempty"`
-	YieldReason string `json:"yield_reason,omitempty"`
+	ID          string                     `json:"id"`
+	Role        string                     `json:"role"`
+	Goal        string                     `json:"goal"`
+	Messages    []ModelMessage             `json:"messages"`
+	Complete    bool                       `json:"complete"`
+	Result      string                     `json:"result,omitempty"`
+	Context     *ContextSummary            `json:"context_summary,omitempty"`
+	Dialogue    *DialogueSummary           `json:"dialogue_summary,omitempty"`
+	Materials   map[string]WorkingMaterial `json:"materials,omitempty"`
+	Delegation  *Delegation                `json:"delegation,omitempty"`
+	Outcome     *DelegationResult          `json:"outcome,omitempty"`
+	YieldReason string                     `json:"yield_reason,omitempty"`
 }
 
 type Delegation struct {
@@ -171,18 +171,20 @@ type ActionFact struct {
 	Reports       []string `json:"reports,omitempty"`
 	Recovery      string   `json:"recovery,omitempty"`
 	Deterministic bool     `json:"deterministic,omitempty"`
+	ActionKey     string   `json:"action_key,omitempty"`
 	Fingerprint   string   `json:"fingerprint,omitempty"`
 }
 
 type ExecutionObservation struct {
-	Subgoal     string          `json:"subgoal"`
-	GoalVersion int             `json:"goal_version"`
-	Failures    map[string]int  `json:"failures,omitempty"`
-	Actions map[string]string `json:"actions,omitempty"`
-	Evidence    []string        `json:"evidence,omitempty"`
-	Replans     int             `json:"replans"`
-	Reason      string          `json:"reason,omitempty"`
-	Verified    map[string]bool `json:"verified,omitempty"`
+	Subgoal     string            `json:"subgoal"`
+	GoalVersion int               `json:"goal_version"`
+	Failures    map[string]int    `json:"failures,omitempty"`
+	Actions     map[string]string `json:"actions,omitempty"`
+	Evidence    []string          `json:"evidence,omitempty"`
+	StopRun     string            `json:"stop_run,omitempty"`
+	Replans     int               `json:"replans"`
+	Reason      string            `json:"reason,omitempty"`
+	Verified    map[string]bool   `json:"verified,omitempty"`
 }
 
 // WorkingMaterial survives history projection and belongs to a specific frame.
@@ -347,7 +349,7 @@ func (p *Project) Fence(run string, epoch int64) error {
 func (p *Project) Public() any {
 	tasks := []map[string]any{}
 	for _, t := range p.Tasks {
-		tasks = append(tasks, map[string]any{"id": t.ID, "goal": t.Goal, "mode": t.Mode, "status": t.Status, "plan": t.Plan, "question": t.Question, "checkpoints": len(t.Checkpoints), "run_ids": t.RunIDs})
+		tasks = append(tasks, map[string]any{"id": t.ID, "goal": t.Goal, "mode": t.Mode, "status": t.Status, "plan": t.Plan, "question": t.Question, "checkpoints": len(t.Checkpoints), "run_ids": t.RunIDs, "last_handoff": t.LastHandoff})
 	}
 	runs := []map[string]any{}
 	for _, r := range p.Runs {

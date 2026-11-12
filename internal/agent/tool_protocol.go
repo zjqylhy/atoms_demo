@@ -15,6 +15,7 @@ type toolProtocol struct {
 	currentAtCommit bool
 	local           bool
 	inputs          func(*core.Project, map[string]any) core.Manifest
+	conditions      func(*core.Project) string
 }
 
 func fileInputs(fields ...string) func(*core.Project, map[string]any) core.Manifest {
@@ -51,7 +52,7 @@ var toolProtocols = map[string]toolProtocol{
 	"assign_step":     {control: "delegate", label: "接收角色交付"},
 	"ask_user":        {control: "wait", label: "等待用户补充", currentAtCommit: true},
 	"propose_plan":    {control: "plan", label: "提交计划", currentAtCommit: true},
-	"finish_task":     {control: "finish", label: "完成任务", currentAtCommit: true, local: true, inputs: allInputs},
+	"finish_task":     {control: "finish", label: "完成任务", currentAtCommit: true, local: true, inputs: allInputs, conditions: completionConditions},
 	"return_step":     {control: "return", label: "交回主 Agent", currentAtCommit: true},
 }
 
@@ -65,8 +66,21 @@ func actionFact(p *core.Project, s scope, c core.Call) core.ActionFact {
 	if profile.inputs != nil {
 		inputs = profile.inputs(p, args)
 	}
-	return core.ActionFact{Disposition: "executed", Inputs: inputs, Deterministic: profile.local,
-		Conditions: fmt.Sprintf("instruction:%d;approved:%t", s.InstructionVersion, permitted(p.Tasks[s.Task]))}
+	conditions := fmt.Sprintf("instruction:%d;approved:%t", s.InstructionVersion, permitted(p.Tasks[s.Task]))
+	if profile.conditions != nil {
+		conditions += ";" + profile.conditions(p)
+	}
+	return core.ActionFact{Disposition: "executed", Inputs: inputs, Deterministic: profile.local, Conditions: conditions}
+}
+
+func completionConditions(p *core.Project) string {
+	checks := map[string]string{}
+	for _, r := range p.Reports {
+		if r.Digest == p.Files.Digest() {
+			checks[r.Kind+":"+reportExecution(r)] = r.Status + core.JSON(r.Checks)
+		}
+	}
+	return core.Hash([]byte(core.JSON(checks)))
 }
 
 func toolEvent(c core.Call) string {

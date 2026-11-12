@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"mockatoms/internal/core"
 	"mockatoms/internal/model"
 )
@@ -84,10 +85,20 @@ func (e *Engine) saveModelReply(s scope, message core.ModelMessage, usage core.U
 		}
 		if failure != nil {
 			var formatError *model.ActionFormatError
-			if allowRepair && errors.As(failure, &formatError) {
+			if errors.As(failure, &formatError) {
+				message.InvalidAction = true
+				frame.Messages = append(frame.Messages, message)
+				if task.Dispositions == nil {
+					task.Dispositions = map[string]core.Step{}
+				}
+				key := s.Frame + "/model:" + s.Run + ":" + fmt.Sprint(r.Calls)
+				task.Dispositions[key] = core.Step{ID: key, FrameID: s.Frame, At: core.Now(), Result: formatError.Error(), Fact: &core.ActionFact{Disposition: "rejected", ErrorClass: "format"}}
+				if !allowRepair {
+					return nil
+				}
 				reply.formatRepair = true
 				r.FormatRepairs++
-				frame.Messages = append(frame.Messages, message, core.ModelMessage{Role: "user", Content: formatFeedbackPrefix + formatError.Error() + "。请重新生成当前动作。只输出一个完整 JSON 对象，最后一个右花括号后立即结束，不追加说明、代码围栏或第二个对象。content 用字符串，无说明时填空字符串。calls 用数组，有动作时只放一个，无动作时填 []。"})
+				frame.Messages = append(frame.Messages, core.ModelMessage{Role: "user", Content: formatFeedbackPrefix + formatError.Error() + "。请重新生成当前动作。只输出一个完整 JSON 对象，最后一个右花括号后立即结束，不追加说明、代码围栏或第二个对象。content 用字符串，无说明时填空字符串。calls 用数组，有动作时只放一个，无动作时填 []。"})
 				p.Event("format_repair", frame.Role, "模型动作格式无效，未执行；正在修正格式", nil)
 			}
 			return nil

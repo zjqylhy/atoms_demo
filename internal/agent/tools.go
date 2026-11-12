@@ -95,8 +95,20 @@ func (b *boundTool) InvokableRun(ctx context.Context, raw string, _ ...tool.Opti
 			fact.Deterministic = true
 			fact.Conditions = "schema:" + core.Hash([]byte(core.JSON(b.def.Parameters)))
 			b.s.fact = &fact
+			if err := b.e.admitTool(b.s, b.call, fact); err != nil {
+				return "", err
+			}
 		}
 		return b.e.record(b.s, b.call, nil, func(*core.Project) (any, error) { return nil, failure })
+	}
+	p, _, _, err := b.e.load(b.s)
+	if err != nil {
+		return "", err
+	}
+	fact := actionFact(p, b.s, b.call)
+	b.s.fact = &fact
+	if err := b.e.admitTool(b.s, b.call, fact); err != nil {
+		return "", err
 	}
 	return b.e.execute(ctx, b.s, b.call, args)
 }

@@ -267,6 +267,11 @@ nextAction:
 		if t.Status == "waiting_plan" || t.Status == "waiting_input" {
 			return "", core.ErrWaiting
 		}
+		if s.Frame == t.Root {
+			if obs := observation(t); obs.StopRun == s.Run {
+				return "", errors.New(obs.Reason + "；恢复预算已用完，进度已保存")
+			}
+		}
 		if f.Complete {
 			return f.Result, nil
 		}
@@ -295,6 +300,9 @@ nextAction:
 		}
 		if yield {
 			return "", errNewInstruction
+		}
+		if f.YieldReason != "" && s.Frame != t.Root {
+			return e.finishDelegation(s, "needs_replan", f.YieldReason, "")
 		}
 		if reason := e.delegationBoundary(p, s, len(pending) > 0); reason != "" {
 			return e.finishDelegation(s, "needs_replan", reason, "")
@@ -339,7 +347,7 @@ nextAction:
 					if errors.Is(err, errNewInstruction) {
 						continue nextAction
 					}
-					return "", err
+					return e.policyError(s, err)
 				}
 				_, state, _, err := e.load(s)
 				if err != nil {
@@ -592,6 +600,7 @@ func (e *Engine) record(s scope, c core.Call, blobs map[string][]byte, operation
 		r = p.Runs[s.Run]
 		f := t.Frames[s.Frame]
 		r.Tools++
+		fact.ActionKey = actionSignature(c.Function.Name, c.Function.Arguments, fact)
 		fact.Outputs = core.Manifest{}
 		for name, file := range p.Files {
 			if before[name] != file {
@@ -609,6 +618,17 @@ func (e *Engine) record(s scope, c core.Call, blobs map[string][]byte, operation
 			}
 		}
 		t.Steps[key] = core.Step{Fact: &fact, ID: key, FrameID: s.Frame, Role: f.Role, Tool: c.Function.Name, ArgsHash: digest, Result: result, At: core.Now()}
+		if observeFact(t, t.Steps[key], positive(e.Config.RepeatFailures, 3)) {
+			obs := observation(t)
+			if s.Frame != t.Root {
+				f.YieldReason = obs.Reason
+				obs.Replans++
+			}
+			p.Event("execution_observation", f.Role, obs.Reason, obs)
+		}
+		for _, report := range p.Reports[reportsBefore:] {
+			observeVerification(t, report)
+		}
 		f.Messages = append(f.Messages, core.ModelMessage{Role: "tool", ToolCallID: c.ID, Content: result})
 		t.Checkpoints = append(t.Checkpoints, core.Checkpoint{ID: core.ID(), At: core.Now(), Manifest: core.Clone(p.Files), StepID: key})
 		text := toolEvent(c)
@@ -649,7 +669,7 @@ Mike：Plan 必须先 propose_plan 等批准；可先 assign_step 给 Emma 整�
 写入工具已返回 saved 和 hash 即代表文件已持久保存，不要仅为确认写入而重复读取。需要修改旧文件、核对未知内容时才读取文件。
 当前摘要匹配的已通过检查可以复用，不要重复同类检查。编写浏览器断言前读取相关 HTML/JS 确定实际选择器，禁止猜测元素 ID、类型或文案。
 验收以用户当前需求和已批准计划为准，不新增用户未要求的列名、目录等约束。analyze_table 聚合结果固定为 group,value 两列，表示分组和数值，可直接交付；用户说按 category 汇总 amount 不等于要求输出同名列。不得因自行推断的列名约束改写计算结果，也不得让 Alex 手工编造图表来源 hash。
-Alex 必须先 check_artifacts，再 run_project 实际运行；Go 用 kind=go, entry=go.mod 直接编译并测试，勿使用 Node 脚本模拟 Go 验收。脚本从预期行为确定 expected_stdout。网页必须 test_preview 进行与需求对应的操作/断言。Mike 核对上面的当前检查记录和专家摘要即可，不重复已经通过的检查；若缺少检查则 assign_step 请 Alex 补做，不能直接调用没有提供的运行工具。检查失败最多自动修复五次，仍失败保留草稿并报告，不能自称已验证。图表数据必须来自 analyze_table 真实结果。
+Alex 必须先 check_artifacts，再 run_project 实际运行；Go 用 kind=go, entry=go.mod 直接编译并测试，勿使用 Node 脚本模拟 Go 验收。脚本从预期行为确定 expected_stdout。网页必须 test_preview 进行与需求对应的操作/断言。Mike 核对上面的当前检查记录和专家摘要即可，不重复已经通过的检查；若缺少检查则 assign_step 请 Alex 补做，不能直接调用没有提供的运行工具。相同条件的确定性失败受到有限恢复预算约束；收到交接反馈后先核对原因，不原样盲重试，不得自称已验证。图表数据必须来自 analyze_table 真实结果。
 %s
 不要展示内部推理，只说明行动、发现与结果。`, role, t.Goal, t.Mode, approved, core.JSON(t.Plan), core.JSON(p.Files), core.JSON(checks), completion)
 }

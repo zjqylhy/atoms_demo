@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-func TestRunnerAllowsFiveRepairsAfterInitialFailure(t *testing.T) {
+func TestRunnerDoesNotTreatUnclassifiedReportsAsDeterministic(t *testing.T) {
 	var jobs atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -61,12 +61,6 @@ func TestRunnerAllowsFiveRepairsAfterInitialFailure(t *testing.T) {
 	for attempt := 1; attempt <= 7; attempt++ {
 		c := call("run_project", args).ToolCalls[0]
 		_, err := e.executeRunner(t.Context(), s, c, args, p)
-		if attempt == 7 {
-			if err == nil || !strings.Contains(err.Error(), "5 次上限") || jobs.Load() != 6 {
-				t.Fatalf("seventh attempt must be blocked, jobs=%d, err=%v", jobs.Load(), err)
-			}
-			break
-		}
 		if err != nil {
 			t.Fatalf("attempt %d: %v", attempt, err)
 		}

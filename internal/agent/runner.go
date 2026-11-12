@@ -15,8 +15,6 @@ import (
 	"time"
 )
 
-const maxRunRepairs = 5
-
 func executionType(args map[string]any) string {
 	switch str(args, "kind") {
 	case "go":
@@ -222,20 +220,6 @@ func (e *Engine) runRunner(ctx context.Context, s scope, c core.Call, args map[s
 	}
 	if endpoint.Scheme != "https" && !(endpoint.Scheme == "http" && (endpoint.Hostname() == "127.0.0.1" || endpoint.Hostname() == "localhost")) {
 		return "", errors.New("远程执行服务必须使用 HTTPS")
-	}
-	failures := 0
-	for _, report := range p.Reports {
-		if report.Status == "failed" && (report.Kind == "run" || report.Kind == "browser") {
-			var d map[string]any
-			_ = json.Unmarshal(report.Details, &d)
-			if d["run_id"] == s.Run && runnerFailureCode(report.Status, report.Checks, d) == "" {
-				failures++
-			}
-		}
-	}
-	// The initial failed execution does not use one of the repair attempts.
-	if !lookupOnly && failures > maxRunRepairs {
-		return "", fmt.Errorf("自动运行修复已达到 %d 次上限，请查看失败记录后调整任务", maxRunRepairs)
 	}
 	jobID, digest := action.JobID, p.Files.Digest()
 	var body []byte
