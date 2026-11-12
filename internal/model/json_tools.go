@@ -42,12 +42,6 @@ content 必须是字符串，calls 必须是数组；需要动作时只放一个
 			content += "\n\n" + instruction
 		}
 		if role == "assistant" {
-			// Long ordinary historical replies are excerpts, never replacement files.
-			if i < completeFrom {
-				if runes := []rune(content); len(runes) > 1500 {
-					content = string(runes[:1000]) + "\n[历史回复节选；完整回复已保存。需要文件内容请 read_file。]"
-				}
-			}
 			calls := []any{}
 			history := []any{}
 			for _, call := range m.ToolCalls {

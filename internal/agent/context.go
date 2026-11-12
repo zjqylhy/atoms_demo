@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"mockatoms/internal/core"
 	"mockatoms/internal/model"
-	"strings"
 )
 
 const (
@@ -20,13 +19,14 @@ type preparedContext struct {
 	request     model.PreparedRequest
 	replacement *core.ContextSummary
 	beforeBytes int
+	dialogue    *dialogueBatch
 }
 
 // Prepare against the serialized request, then keep the same bytes for admission and transport.
 func prepareFrameContext(client *model.Client, p *core.Project, task *core.Task, frame *core.Frame, tools []model.Tool) (preparedContext, error) {
 	system := core.ModelMessage{Role: "system", Content: instructions(frame.Role, p, task)}
-	full := append([]core.ModelMessage{system}, frame.Messages...)
 	if client.Config.ToolMode != "json" {
+		full := append([]core.ModelMessage{system}, frame.Messages...)
 		request, err := client.PrepareRequest(full, tools, len(full))
 		if err == nil {
 			err = client.ValidateRequest(request)
@@ -34,26 +34,14 @@ func prepareFrameContext(client *model.Client, p *core.Project, task *core.Task,
 		return preparedContext{request: request}, err
 	}
 
-	var requirements []contextRequirement
-	readRequirements := false
-	encode := func(summary *core.ContextSummary) (model.PreparedRequest, error) {
-		if summary == nil {
-			return client.PrepareRequest(full, tools, len(full))
-		}
-		if !readRequirements {
-			requirements = taskRequirements(p, task)
-			readRequirements = true
-		}
-		messages := contextPrefix(system, frame.Messages, summary.Through, requirements)
-		messages = append(messages, core.ModelMessage{Role: "user", Content: summary.Text})
-		completeFrom := len(messages)
-		messages = append(messages, frame.Messages[summary.Through:]...)
-		return client.PrepareRequest(messages, tools, completeFrom)
-	}
-
 	summary := frame.Context
 	if summary != nil && (summary.Through < 1 || summary.Through > len(frame.Messages)) {
 		summary = nil
+	}
+	history := newContextHistory(system, frame.Messages, taskRequirements(p, task))
+	encode := func(summary *core.ContextSummary) (model.PreparedRequest, error) {
+		messages, completeFrom := history.project(summary, frame.Dialogue)
+		return client.PrepareRequest(messages, tools, completeFrom)
 	}
 	request, err := encode(summary)
 	if err != nil {
@@ -84,23 +72,13 @@ func prepareFrameContext(client *model.Client, p *core.Project, task *core.Task,
 			return best, nil
 		}
 	}
-	if best.request.ByteSize() > limit {
-		// Identify whether the fixed requirements alone fill the window.
-		if !readRequirements {
-			requirements = taskRequirements(p, task)
-		}
-		required := contextPrefix(system, frame.Messages, len(frame.Messages), requirements)
-		base, err := client.PrepareRequest(required, tools, len(required))
-		if err != nil {
-			return preparedContext{}, err
-		}
-		part := "近期完整动作及其结果"
-		if base.ByteSize() > limit {
-			part = "必须保留的任务要求、计划或工具定义"
-		}
-		return preparedContext{}, fmt.Errorf("当前模型上下文过大：%s占用过多，最小请求 %d 字节，超过 %d 字节上限，进度已保留", part, best.request.ByteSize(), limit)
+	if best.request.ByteSize() <= limit {
+		return best, nil
 	}
-	return best, nil
+	if best.replacement != nil {
+		summary = best.replacement
+	}
+	return prepareDialogueBatch(client, tools, history, summary, frame.Dialogue, best)
 }
 
 func percentOf(size, percent int) int {
@@ -109,17 +87,11 @@ func percentOf(size, percent int) int {
 
 // Boundaries never split a tool request from any of its recorded results.
 func completeActionStarts(messages []core.ModelMessage) []int {
-	var starts, plain []int
+	var starts []int
 	open := map[string]bool{}
 	start := 0
-	hasTools := false
 	for i, m := range messages {
-		if m.Role == "assistant" && !m.InvalidAction {
-			if len(m.ToolCalls) == 0 {
-				plain = append(plain, i)
-				continue
-			}
-			hasTools = true
+		if m.Role == "assistant" && !m.InvalidAction && len(m.ToolCalls) != 0 {
 			if len(open) == 0 {
 				start = i
 			}
@@ -134,13 +106,11 @@ func completeActionStarts(messages []core.ModelMessage) []int {
 			}
 		}
 	}
-	if !hasTools {
-		return plain
-	}
 	return starts
 }
 
 type contextRequirement struct {
+	Source   string `json:"-"`
 	Kind     string `json:"kind"`
 	Question string `json:"question,omitempty"`
 	Text     string `json:"text"`
@@ -156,7 +126,7 @@ func taskRequirements(p *core.Project, task *core.Task) []contextRequirement {
 	var out []contextRequirement
 	var question string
 	eventIndex := 0
-	for _, m := range p.Messages {
+	for index, m := range p.Messages {
 		if m.At < started || m.Role != "user" || (m.Kind != "answer" && m.Kind != "plan_feedback") {
 			continue
 		}
@@ -167,36 +137,11 @@ func taskRequirements(p *core.Project, task *core.Task) []contextRequirement {
 			}
 			eventIndex++
 		}
-		value := contextRequirement{Kind: m.Kind, Text: m.Text}
+		value := contextRequirement{Source: fmt.Sprintf("user:%d", index), Kind: m.Kind, Text: m.Text}
 		if m.Kind == "answer" {
 			value.Question, question = question, ""
 		}
 		out = append(out, value)
-	}
-	return out
-}
-
-func contextPrefix(system core.ModelMessage, history []core.ModelMessage, cut int, requirements []contextRequirement) []core.ModelMessage {
-	out := []core.ModelMessage{system}
-	alreadyKept := map[string]bool{}
-	if len(requirements) > 0 {
-		out = append(out, core.ModelMessage{Role: "user", Content: "本任务已记录的用户回答和计划更正（按时间排序）：\n" + core.JSON(requirements)})
-		for _, r := range requirements {
-			if r.Kind == "answer" {
-				alreadyKept["用户补充："+r.Text] = true
-			} else {
-				alreadyKept["修改计划，仍须等待批准："+r.Text] = true
-			}
-		}
-	}
-	for i, m := range history[:cut] {
-		if m.Role != "user" || alreadyKept[m.Content] {
-			continue
-		}
-		if i > 0 && (m.Content == nextActionPrompt || (history[i-1].InvalidAction && strings.HasPrefix(m.Content, formatFeedbackPrefix))) {
-			continue
-		}
-		out = append(out, m)
 	}
 	return out
 }

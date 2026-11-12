@@ -123,19 +123,32 @@ type Usage struct {
 	Known  bool `json:"known"`
 }
 type Frame struct {
-	ID       string          `json:"id"`
-	Role     string          `json:"role"`
-	Goal     string          `json:"goal"`
-	Messages []ModelMessage  `json:"messages"`
-	Complete bool            `json:"complete"`
-	Result   string          `json:"result,omitempty"`
-	Context  *ContextSummary `json:"context_summary,omitempty"`
+	ID       string           `json:"id"`
+	Role     string           `json:"role"`
+	Goal     string           `json:"goal"`
+	Messages []ModelMessage   `json:"messages"`
+	Complete bool             `json:"complete"`
+	Result   string           `json:"result,omitempty"`
+	Context  *ContextSummary  `json:"context_summary,omitempty"`
+	Dialogue *DialogueSummary `json:"dialogue_summary,omitempty"`
 }
 
 // ContextSummary projects a closed prefix of the frame's immutable model history.
 type ContextSummary struct {
 	Through int    `json:"through"`
 	Text    string `json:"text"`
+}
+
+// DialogueSummary tracks how many bytes of each original message are covered.
+type DialogueSummary struct {
+	Covered map[string]int        `json:"covered"`
+	Items   []DialogueSummaryItem `json:"items"`
+}
+
+type DialogueSummaryItem struct {
+	Kind    string   `json:"kind"`
+	Text    string   `json:"text"`
+	Sources []string `json:"sources"`
 }
 type Step struct {
 	ID       string `json:"id"`
