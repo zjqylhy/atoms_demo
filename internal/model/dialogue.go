@@ -15,6 +15,10 @@ const dialogueOutputLimit = 8192
 // PrepareDialogue uses the same endpoint without the instructions and tools for task execution.
 func (c *Client) PrepareDialogue(input string) (PreparedRequest, error) {
 	maxOutput := min(c.outputLimit(), dialogueOutputLimit)
+	if c.Config.Protocol == "responses" {
+		body, err := json.Marshal(map[string]any{"model": c.Config.Model, "input": []map[string]string{{"role": "system", "content": dialogueInstructions}, {"role": "user", "content": input}}, "store": false, "max_output_tokens": maxOutput})
+		return PreparedRequest{route: "/responses", body: body, maxOutput: maxOutput}, err
+	}
 	body, err := json.Marshal(map[string]any{
 		"model": c.Config.Model,
 		"messages": []map[string]string{

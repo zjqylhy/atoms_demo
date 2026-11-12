@@ -35,6 +35,7 @@ type FileInfo = {
   size: number;
   kind: string;
   read_only?: boolean;
+  binary?: boolean;
 };
 type Report = {
   id: string;

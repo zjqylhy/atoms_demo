@@ -70,7 +70,7 @@ func (e *Engine) skipPendingTools(s scope, calls []core.Call) error {
 					task.Dispositions = map[string]core.Step{}
 				}
 				key := s.Frame + "/" + call.ID
-				task.Dispositions[key] = core.Step{ID: key, FrameID: s.Frame, Tool: call.Function.Name, Result: content, At: core.Now(), Fact: &core.ActionFact{Disposition: "not_started", ErrorClass: "control", ErrorCode: "new_instruction"}}
+				task.Dispositions[key] = core.Step{ID: key, FrameID: s.Frame, Tool: call.Function.Name, Result: content, At: core.Now(), Fact: &core.ActionFact{Disposition: "not_started", ErrorClass: "control", ErrorCode: "new_instruction"}, ArgsHash: core.Hash([]byte(call.Function.Name + "\n" + call.Function.Arguments))}
 			}
 			frame.Messages = append(frame.Messages, core.ModelMessage{
 				Role: "tool", ToolCallID: call.ID, Content: content,

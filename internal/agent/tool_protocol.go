@@ -76,7 +76,7 @@ func actionFact(p *core.Project, s scope, c core.Call) core.ActionFact {
 func completionConditions(p *core.Project) string {
 	checks := map[string]string{}
 	for _, r := range p.Reports {
-		if r.Digest == p.Files.Digest() {
+		if reportCurrent(p, p.Tasks[p.CurrentTask], r) {
 			checks[r.Kind+":"+reportExecution(r)] = r.Status + core.JSON(r.Checks)
 		}
 	}

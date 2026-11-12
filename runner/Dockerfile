@@ -24,6 +24,6 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY --from=go-toolchain /usr/local/go /usr/local/go
 COPY --from=go-toolchain /opt/atoms/go-cache /opt/atoms/go-cache
 RUN /usr/local/go/bin/go version && /usr/bin/python3 --version
-COPY job.cjs ./
+COPY job.cjs outputs.cjs ./
 WORKDIR /workspace
 ENTRYPOINT ["node", "/opt/atoms/job.cjs"]

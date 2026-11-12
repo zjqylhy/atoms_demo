@@ -17,7 +17,9 @@ import (
 )
 
 type Engine struct {
-	Store  *store.Store
+	Store *store.Store
+	// Quota defaults to Store; isolated acceptance copies can share the live ledger.
+	Quota  *store.Store
 	Config config.Config
 	Model  model.Generator
 	mu     sync.Mutex
@@ -36,7 +38,7 @@ type scope struct {
 }
 
 func New(s *store.Store, c config.Config, g model.Generator) *Engine {
-	return &Engine{Store: s, Config: c, Model: g, active: map[string]activeRun{}}
+	return &Engine{Store: s, Quota: s, Config: c, Model: g, active: map[string]activeRun{}}
 }
 func (e *Engine) Shutdown() {
 	e.mu.Lock()
@@ -283,13 +285,12 @@ nextAction:
 			formatRetries, tpmRetries = 0, 0
 			lastInstructionVersion = version
 		}
-		if action := t.RunnerAction; s.Frame == t.Root && action != nil &&
-			(action.InstructionVersion != version || (action.FrameID != t.Root && !strings.HasPrefix(action.FrameID, t.Root+"/"))) {
-			if err := e.recoverRunner(ctx, s, p, action); err != nil {
-				return "", err
-			}
+		if handled, err := e.recoverExternal(ctx, s, p); err != nil {
+			return "", err
+		} else if handled {
 			continue
 		}
+
 		pending, actionVersion := pendingCalls(f.Messages)
 		yield := s.Frame != t.Root && s.InstructionVersion != version
 		if len(pending) > 0 && (yield || actionVersion != version) {
@@ -302,7 +303,11 @@ nextAction:
 			return "", errNewInstruction
 		}
 		if f.YieldReason != "" && s.Frame != t.Root {
-			return e.finishDelegation(s, "needs_replan", f.YieldReason, "")
+			status := f.YieldStatus
+			if status == "" {
+				status = "needs_replan"
+			}
+			return e.finishDelegation(s, status, f.YieldReason, "")
 		}
 		if reason := e.delegationBoundary(p, s, len(pending) > 0); reason != "" {
 			return e.finishDelegation(s, "needs_replan", reason, "")
@@ -332,6 +337,20 @@ nextAction:
 				}
 			}
 			for _, call := range pending {
+				current, _, currentFrame, err := e.load(s)
+				if err != nil {
+					return "", err
+				}
+				if reason := e.delegationBoundary(current, s, true); reason != "" {
+					return e.finishDelegation(s, "needs_replan", reason, "")
+				}
+				if currentFrame.YieldReason != "" && s.Frame != t.Root {
+					status := currentFrame.YieldStatus
+					if status == "" {
+						status = "needs_replan"
+					}
+					return e.finishDelegation(s, status, currentFrame.YieldReason, "")
+				}
 				registered := []tool.BaseTool{}
 				for _, def := range definitions(f.Role) {
 					registered = append(registered, &boundTool{def: def, e: e, s: actionScope, call: call})
@@ -388,7 +407,7 @@ nextAction:
 			reserveTokens = prepared.request.ReservationTokens()
 			notified := false
 			for {
-				wait, err := e.Store.ReserveModelWindow(reserveTokens, e.Config.ProviderTPM)
+				wait, err := e.Quota.ReserveModelWindow(reserveTokens, e.Config.ProviderTPM)
 				if err != nil {
 					return "", err
 				}
@@ -401,7 +420,7 @@ nextAction:
 					}
 					notified = true
 				}
-				if err := waitForRetry(ctx, wait); err != nil {
+				if err := e.waitForModel(ctx, f, wait); err != nil {
 					return "", err
 				}
 				current, _, _, err := e.load(s)
@@ -444,7 +463,7 @@ nextAction:
 				if err := e.noteWait(s, "model_wait", f.Role, fmt.Sprintf("网关每分钟 Token 额度不足，等待后重试（%d/%d）", tpmRetries, maxTPMRetries)); err != nil {
 					return "", err
 				}
-				if err := waitForRetry(ctx, wait); err != nil {
+				if err := e.waitForModel(ctx, f, wait); err != nil {
 					return "", err
 				}
 				continue
@@ -541,8 +560,15 @@ func (e *Engine) record(s scope, c core.Call, blobs map[string][]byte, operation
 			return err
 		}
 		t := p.Tasks[s.Task]
-		if old, ok := t.Steps[key]; ok {
-			if old.ArgsHash != digest {
+		old, recorded := t.Steps[key]
+		if !recorded {
+			old, recorded = t.Dispositions[key]
+			if recorded && old.Fact != nil && old.Fact.Disposition == "unknown" {
+				recorded = false
+			}
+		}
+		if recorded {
+			if old.ArgsHash != "" && old.ArgsHash != digest {
 				return errors.New("同一工具标识的参数发生变化")
 			}
 			result = old.Result
@@ -583,6 +609,7 @@ func (e *Engine) record(s scope, c core.Call, blobs map[string][]byte, operation
 			}
 		}
 		if failure != nil {
+			clear(blobs)
 			fact.Disposition = "rejected"
 			fact.ErrorClass = "validation"
 			fact.ErrorCode = core.Hash([]byte(failure.Error()))
@@ -595,6 +622,10 @@ func (e *Engine) record(s scope, c core.Call, blobs map[string][]byte, operation
 		}
 		t = p.Tasks[s.Task]
 		if action := t.RunnerAction; action != nil && action.FrameID == s.Frame && action.CallID == c.ID {
+			if prior, ok := t.Dispositions[key]; ok && prior.Fact != nil {
+				prior.Fact.ResolvedBy = key
+				t.Dispositions[key] = prior
+			}
 			t.RunnerAction = nil
 		}
 		r = p.Runs[s.Run]
@@ -607,15 +638,28 @@ func (e *Engine) record(s scope, c core.Call, blobs map[string][]byte, operation
 				fact.Outputs[name] = file
 			}
 		}
+		for name := range before {
+			if _, exists := p.Files[name]; !exists {
+				fact.Deleted = append(fact.Deleted, name)
+			}
+		}
 		for _, report := range p.Reports[reportsBefore:] {
 			fact.Reports = append(fact.Reports, report.ID)
 			if report.Status == "failed" {
-				fact.ErrorClass = "execution"
-				fact.ErrorCode = core.Hash([]byte(core.JSON(report.Checks)))
+				if fact.ErrorClass == "" {
+					fact.ErrorClass = "execution"
+				}
+				if fact.ErrorCode == "" {
+					fact.ErrorCode = core.Hash([]byte(core.JSON(report.Checks)))
+				}
 				if fact.Deterministic {
 					fact.Fingerprint = failureFingerprint(c.Function.Name, c.Function.Arguments, fact)
 				}
 			}
+		}
+		if fact.ErrorClass == "transient" && s.Frame != t.Root {
+			f.YieldReason = "执行环境故障，已保留原作业报告，请核对执行环境后决定下一步"
+			f.YieldStatus = "blocked"
 		}
 		t.Steps[key] = core.Step{Fact: &fact, ID: key, FrameID: s.Frame, Role: f.Role, Tool: c.Function.Name, ArgsHash: digest, Result: result, At: core.Now()}
 		if observeFact(t, t.Steps[key], positive(e.Config.RepeatFailures, 3)) {
@@ -627,7 +671,9 @@ func (e *Engine) record(s scope, c core.Call, blobs map[string][]byte, operation
 			p.Event("execution_observation", f.Role, obs.Reason, obs)
 		}
 		for _, report := range p.Reports[reportsBefore:] {
-			observeVerification(t, report)
+			if reportCurrent(p, t, report) {
+				observeVerification(t, report)
+			}
 		}
 		f.Messages = append(f.Messages, core.ModelMessage{Role: "tool", ToolCallID: c.ID, Content: result})
 		t.Checkpoints = append(t.Checkpoints, core.Checkpoint{ID: core.ID(), At: core.Now(), Manifest: core.Clone(p.Files), StepID: key})
@@ -648,7 +694,7 @@ func instructions(role string, p *core.Project, t *core.Task) string {
 	}
 	checks := []map[string]string{}
 	for _, report := range p.Reports {
-		if report.Digest == p.Files.Digest() {
+		if reportCurrent(p, t, report) {
 			entry := map[string]string{"kind": report.Kind, "status": report.Status, "id": report.ID}
 			if execution := reportExecution(report); execution != "" {
 				entry["execution"] = execution
@@ -669,7 +715,7 @@ Mike：Plan 必须先 propose_plan 等批准；可先 assign_step 给 Emma 整�
 写入工具已返回 saved 和 hash 即代表文件已持久保存，不要仅为确认写入而重复读取。需要修改旧文件、核对未知内容时才读取文件。
 当前摘要匹配的已通过检查可以复用，不要重复同类检查。编写浏览器断言前读取相关 HTML/JS 确定实际选择器，禁止猜测元素 ID、类型或文案。
 验收以用户当前需求和已批准计划为准，不新增用户未要求的列名、目录等约束。analyze_table 聚合结果固定为 group,value 两列，表示分组和数值，可直接交付；用户说按 category 汇总 amount 不等于要求输出同名列。不得因自行推断的列名约束改写计算结果，也不得让 Alex 手工编造图表来源 hash。
-Alex 必须先 check_artifacts，再 run_project 实际运行；Go 用 kind=go, entry=go.mod 直接编译并测试，勿使用 Node 脚本模拟 Go 验收。脚本从预期行为确定 expected_stdout。网页必须 test_preview 进行与需求对应的操作/断言。Mike 核对上面的当前检查记录和专家摘要即可，不重复已经通过的检查；若缺少检查则 assign_step 请 Alex 补做，不能直接调用没有提供的运行工具。相同条件的确定性失败受到有限恢复预算约束；收到交接反馈后先核对原因，不原样盲重试，不得自称已验证。图表数据必须来自 analyze_table 真实结果。
+Alex 必须先 check_artifacts，再 run_project 实际运行；Go 用 kind=go, entry=go.mod 直接编译并测试，勿使用 Node 脚本模拟 Go 验收。脚本从预期行为确定 expected_stdout；生成文件通过 outputs 回收，使用 assertions 检查真实内容。二进制交付前以 propose_plan.delivery 声明目标、依赖、需要保留的能力及所有计划验收项的对应关系；历史文件不自动加入交付范围，但不得遗漏用户要求。网页必须 test_preview 进行与需求对应的操作/断言。Mike 核对上面的当前检查记录和专家摘要即可，不重复已经通过的检查；若缺少检查则 assign_step 请 Alex 补做，不能直接调用没有提供的运行工具。相同条件的确定性失败受到有限恢复预算约束；收到交接反馈后先核对原因，不原样盲重试，不得自称已验证。图表数据必须来自 analyze_table 真实结果。
 %s
 不要展示内部推理，只说明行动、发现与结果。`, role, t.Goal, t.Mode, approved, core.JSON(t.Plan), core.JSON(p.Files), core.JSON(checks), completion)
 }

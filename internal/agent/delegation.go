@@ -127,7 +127,7 @@ func closeUnstarted(p *core.Project, s scope, calls []core.Call, reason string) 
 		key := s.Frame + "/" + call.ID
 		fact := &core.ActionFact{Disposition: "not_started", ErrorClass: "control", ErrorCode: reason}
 		result := core.JSON(map[string]any{"ok": false, "skipped": true, "error": reason, "fact": fact})
-		t.Dispositions[key] = core.Step{ID: key, FrameID: s.Frame, Tool: call.Function.Name, Role: f.Role, At: core.Now(), Result: result, Fact: fact}
+		t.Dispositions[key] = core.Step{ID: key, FrameID: s.Frame, Tool: call.Function.Name, Role: f.Role, At: core.Now(), Result: result, Fact: fact, ArgsHash: core.Hash([]byte(call.Function.Name + "\n" + call.Function.Arguments))}
 		f.Messages = append(f.Messages, core.ModelMessage{Role: "tool", ToolCallID: call.ID, Content: result})
 	}
 }
@@ -202,7 +202,11 @@ func (e *Engine) delegate(ctx context.Context, s scope, c core.Call, a map[strin
 		if errors.Is(err, core.ErrStale) || errors.Is(err, core.ErrWaiting) || ctx.Err() != nil {
 			return "", err
 		}
-		result, err = e.finishDelegation(child, "blocked", fmt.Sprintf("子任务交回：%s", e.Config.Redact(err.Error())), "")
+		status := "blocked"
+		if errors.Is(err, errDelegateBudget) || errors.Is(err, context.DeadlineExceeded) {
+			status = "needs_replan"
+		}
+		result, err = e.finishDelegation(child, status, fmt.Sprintf("子任务交回：%s", e.Config.Redact(err.Error())), "")
 		if err != nil {
 			return "", err
 		}
@@ -213,4 +217,10 @@ func (e *Engine) delegate(ctx context.Context, s scope, c core.Call, a map[strin
 		}
 		return map[string]any{"role": role, "summary": result, "outcome": p.Tasks[s.Task].Frames[childID].Outcome, "files": p.Files}, nil
 	})
+}
+
+func (e *Engine) waitForModel(ctx context.Context, f *core.Frame, wait time.Duration) error {
+	bounded, cancel := e.modelContext(ctx, f)
+	defer cancel()
+	return waitForRetry(bounded, wait)
 }

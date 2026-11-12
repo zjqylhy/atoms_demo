@@ -90,3 +90,38 @@ func TestDispositionClosesCallsWithoutExecuting(t *testing.T) {
 		}
 	}
 }
+
+func TestClosedDispositionCannotReplayEvenWithProviderIDReuse(t *testing.T) {
+	e, p := testEngine(t, nil)
+	s := scope{Owner: "alice", Project: p.ID, Task: "task", Run: "run", Frame: "root", Epoch: 1}
+	message := call("write_file", map[string]any{"path": "never.txt", "content": "not started", "old_hash": ""})
+	c := message.ToolCalls[0]
+	_, err := e.Store.Mutate(s.Owner, p.ID, nil, func(p *core.Project) error {
+		p.CurrentTask, p.ActiveRun, p.Epoch = s.Task, s.Run, s.Epoch
+		p.Runs[s.Run] = &core.Run{ID: s.Run, Status: "running"}
+		p.Tasks[s.Task] = &core.Task{ID: s.Task, Root: s.Frame, Mode: "build", Steps: map[string]core.Step{}, Frames: map[string]*core.Frame{s.Frame: {ID: s.Frame, Role: "Alex", Messages: []core.ModelMessage{message}}}}
+		closeUnstarted(p, s, message.ToolCalls, "budget")
+		p.Tasks[s.Task].Frames[s.Frame].Messages = append(p.Tasks[s.Task].Frames[s.Frame].Messages, message)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := e.record(s, c, nil, func(*core.Project) (any, error) {
+		t.Fatal("closed call executed again")
+		return nil, nil
+	})
+	if err != nil || !strings.Contains(result, `"not_started"`) {
+		t.Fatal("closed disposition not returned", result, err)
+	}
+	p, _ = e.Store.Get(s.Owner, p.ID)
+	task := p.Tasks[s.Task]
+	pending, _ := pendingCalls(task.Frames[s.Frame].Messages)
+	if len(pending) != 0 || len(task.Steps) != 0 || p.Runs[s.Run].Tools != 0 || len(task.Checkpoints) != 0 {
+		t.Fatal("repeated closed call changed execution accounting")
+	}
+	c.Function.Arguments = `{"path":"different.txt"}`
+	if _, err := e.record(s, c, nil, func(*core.Project) (any, error) { return nil, nil }); err == nil {
+		t.Fatal("provider ID reused for different arguments")
+	}
+}

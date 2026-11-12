@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"mockatoms/internal/config"
 	"mockatoms/internal/core"
@@ -10,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestWorkingMaterialsSurviveRetriesAndBothSummaries(t *testing.T) {
@@ -99,5 +101,65 @@ func TestSchemaFeedbackIncludesAllowedAndRequiredFields(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestLongLineByteRangesAndDeletedMaterial(t *testing.T) {
+	e, p := testEngine(t, nil)
+	s := scope{Owner: "alice", Project: p.ID, Task: "task", Run: "run", Frame: "root", Epoch: 1}
+	content := strings.Repeat("长行🙂", 2400)
+	hash := core.Hash([]byte(content))
+	_, err := e.Store.Mutate(s.Owner, p.ID, map[string][]byte{hash: []byte(content)}, func(p *core.Project) error {
+		p.CurrentTask, p.ActiveRun, p.Epoch = s.Task, s.Run, s.Epoch
+		p.Files["long.txt"] = core.File{Hash: hash, Size: len(content)}
+		p.Runs[s.Run] = &core.Run{ID: s.Run, Status: "running"}
+		p.Tasks[s.Task] = &core.Task{ID: s.Task, Root: s.Frame, Mode: "build", Steps: map[string]core.Step{}, Frames: map[string]*core.Frame{s.Frame: {ID: s.Frame, Role: "Alex"}}}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recovered strings.Builder
+	segments := 0
+	for offset := 0; offset < len(content); segments++ {
+		args := map[string]any{"path": "long.txt", "offset": float64(offset), "limit": float64(15999)}
+		result, err := e.execute(t.Context(), s, call("read_file", args).ToolCalls[0], args)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response struct {
+			OK     bool `json:"ok"`
+			Result struct {
+				Content string `json:"content"`
+				Next    int    `json:"next_offset"`
+			} `json:"result"`
+		}
+		if json.Unmarshal([]byte(result), &response) != nil || !response.OK || response.Result.Next <= offset || !utf8.ValidString(response.Result.Content) {
+			t.Fatal("invalid byte read", result)
+		}
+		recovered.WriteString(response.Result.Content)
+		offset = response.Result.Next
+	}
+	if recovered.String() != content {
+		t.Fatal("byte ranges lost source content")
+	}
+	p, _ = e.Store.Get(s.Owner, s.Project)
+	if len(p.Tasks[s.Task].Frames[s.Frame].Materials) != segments {
+		t.Fatal("reading a later segment discarded an earlier dependency")
+	}
+	args := map[string]any{"path": "long.txt", "old_hash": hash}
+	c := call("delete_file", args).ToolCalls[0]
+	if _, err := e.execute(t.Context(), s, c, args); err != nil {
+		t.Fatal(err)
+	}
+	p, _ = e.Store.Get(s.Owner, s.Project)
+	if len(p.Tasks[s.Task].Frames[s.Frame].Materials) != 0 || core.JSON(p.Tasks[s.Task].Steps[s.Frame+"/"+c.ID].Fact.Deleted) != `["long.txt"]` {
+		t.Fatal("deleted resource remained current or lacked a deletion fact")
+	}
+	if _, _, err := fileBytes(content, 1, 100); err == nil {
+		t.Fatal("accepted a byte offset inside a character")
+	}
+	if material := fileMaterial("long.txt", core.File{Hash: hash}, content, "write"); material.Content == "" || !strings.Contains(material.Recovery, "offset=") {
+		t.Fatal("long single-line write lost recoverable current material")
 	}
 }

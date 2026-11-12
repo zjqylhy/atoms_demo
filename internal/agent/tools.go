@@ -31,16 +31,16 @@ func def(name, desc string, fields map[string]any, required ...string) model.Too
 func definitions(role string) []model.Tool {
 	all := []model.Tool{
 		def("list_files", "查看当前项目文件和内容摘要", map[string]any{}),
-		def("read_file", "分行读取项目文件，修改时使用返回的 hash；截取时按 next_line 继续读取", map[string]any{"path": prop("string", "相对路径"), "start_line": prop("integer", "起始行，默认 1"), "end_line": prop("integer", "结束行，默认到末尾；每次最多 16000 字节")}, "path"),
+		def("read_file", "分行读取项目文件，修改时使用返回的 hash；截取时按 next_line 继续。超长单行用 offset/limit 按字节读取并按 next_offset 继续，不改写源文件", map[string]any{"path": prop("string", "相对路径"), "start_line": prop("integer", "起始行，默认 1"), "end_line": prop("integer", "结束行，默认到末尾；每次最多 16000 字节"), "offset": prop("integer", "可选 UTF-8 字节偏移，从 0 开始；不能与行范围混用"), "limit": prop("integer", "字节读取长度 4–16000，默认 16000，须同时指定 offset")}, "path"),
 		def("search_files", "在项目文本中搜索字面文本，最多返回 50 处", map[string]any{"query": prop("string", "搜索文本")}, "query"),
-		def("check_artifacts", "执行真实结构、语法及格式检查，结果不代替运行测试", map[string]any{}),
+		def("check_artifacts", "执行真实结构及内容断言；可指定 paths 检查生成前输入，最终交付须覆盖整个交付范围", map[string]any{"paths": listProp("string"), "assertions": assertionsProp()}),
 	}
 	writes := map[string]any{"path": prop("string", "相对路径"), "content": prop("string", "全部 UTF-8 内容，保存会完整替换文件；局部片段请使用局部编辑工具"), "old_hash": prop("string", "已有文件的 hash；创建新文件填空字符串")}
 	switch role {
 	case "Mike":
 		all = append(all,
 			def("ask_user", "提出必要问题并等待用户回答", map[string]any{"question": prop("string", "问题"), "options": listProp("string")}, "question"),
-			def("propose_plan", "保存计划及验收条件，Plan 模式会等待用户批准", map[string]any{"plan": prop("string", "Markdown 计划"), "acceptance": listProp("string")}, "plan", "acceptance"),
+			def("propose_plan", "保存计划及验收条件，Plan 模式会等待用户批准", map[string]any{"plan": prop("string", "Markdown 计划"), "acceptance": listProp("string"), "delivery": deliveryProp()}, "plan", "acceptance"),
 			def("assign_step", "按需分派一个专家并回收工作结果；不能多层委派", map[string]any{"role": map[string]any{"type": "string", "enum": []string{"Emma", "Bob", "Alex", "David"}}, "goal": prop("string", "子目标、已有输入及有效用户限制"), "acceptance": listProp("string"), "approach": prop("string", "模型选择的技术路线，与用户约束分开；重规划需说明改变的条件")}, "role", "goal"),
 			def("finish_task", "申请完成：后端核验产物与真实报告，通过后才形成版本", map[string]any{"summary": prop("string", "交付内容、已验证项、未覆盖项"), "answer_only": prop("boolean", "仅普通解释问答且未修改产物时为 true")}, "summary", "answer_only"))
 	case "Emma":
@@ -52,8 +52,8 @@ func definitions(role string) []model.Tool {
 			def("write_file", "完整替换文件，必须提供全部内容；不得把片段当完整文件。局部修改或大文件分次修改用 replace_text，拒绝覆盖意外变化", writes, "path", "content", "old_hash"),
 			def("replace_text", "按旧摘要精确替换，匹配次数必须等于 expected_count", map[string]any{"path": prop("string", "文件路径"), "old_hash": prop("string", "文件当前摘要"), "old_text": prop("string", "待替换文字"), "new_text": prop("string", "新文字"), "expected_count": prop("integer", "预期匹配次数")}, "path", "old_hash", "old_text", "new_text", "expected_count"),
 			def("delete_file", "只从当前草稿中移除文件，保留历史", map[string]any{"path": prop("string", "路径"), "old_hash": prop("string", "文件当前摘要")}, "path", "old_hash"),
-			def("run_project", "在隔离环境真实构建网页、运行 JavaScript/TypeScript/Python 脚本或编译并测试 Go 模块。kind=go 时使用 go.mod；kind=script 必填 expected_stdout，工作目录为临时目录，项目文件按脚本位置解析", map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"web", "script", "go"}}, "entry": prop("string", "网页 index.html、脚本相对路径或根目录 go.mod"), "args": listProp("string"), "expected_stdout": prop("string", "kind=script 必填，去除首尾空白后精确比较；其他类型省略")}, "kind", "entry"),
-			def("test_preview", "隔离浏览器执行需求对应的交互断言；至少一个断言，禁止自定义 JS", map[string]any{"steps": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string", "enum": []string{"click", "fill", "select", "check", "expect_text", "expect_count", "expect_visible"}}, "selector": prop("string", "CSS 选择器"), "value": prop("string", "输入或期望文本"), "count": prop("integer", "期望数量"), "requirement": prop("string", "对应用户需求或计划验收项")}, "required": []string{"action", "selector", "requirement"}, "additionalProperties": false}}}, "steps"))
+			def("run_project", "在隔离环境真实构建网页、运行 JavaScript/TypeScript/Python 脚本或编译并测试 Go 模块。kind=go 时使用 go.mod；kind=script 必填 expected_stdout，输入目录 /workspace/project 只读，当前工作目录 /workspace/scratch 可写。输出用当前目录相对路径，不写源码目录；输入相对 __file__ 读取。生成文件必须用 outputs 声明回收；assertions 对回收字节做内容验收，stdout 不能代替内容验收", map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"web", "script", "go"}}, "entry": prop("string", "网页 index.html、脚本相对路径或根目录 go.mod"), "args": listProp("string"), "expected_stdout": prop("string", "kind=script 必填，去除首尾空白后精确比较；其他类型省略"), "outputs": outputsProp(), "assertions": assertionsProp()}, "kind", "entry"),
+			def("test_preview", "隔离浏览器执行需求对应的交互断言；至少一个断言，禁止自定义 JS", map[string]any{"steps": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string", "enum": []string{"click", "fill", "select", "check", "expect_text", "expect_count", "expect_visible"}}, "selector": prop("string", "CSS 选择器"), "value": prop("string", "输入或期望文本"), "count": prop("integer", "期望数量"), "requirement": prop("string", "对应用户需求或计划验收项"), "paths": listProp("string")}, "required": []string{"action", "selector", "requirement"}, "additionalProperties": false}}}, "steps"))
 	case "David":
 		all = append(all, def("write_document", "保存分析报告 Markdown", writes, "path", "content", "old_hash"),
 			def("analyze_table", "对用户原始 CSV/JSON 执行真实统计并保存结果 CSV；聚合结果固定列名 group,value，分别为分组和数值，可直接交付并生成图表，不要手工改写", map[string]any{"source": prop("string", "只读输入文件路径"), "group_by": prop("string", "分组字段，可为空"), "value": prop("string", "运算字段，count 可为空"), "operation": map[string]any{"type": "string", "enum": []string{"select", "count", "sum", "mean", "min", "max"}}, "output": prop("string", "结果 CSV 路径"), "filter_column": prop("string", "可选筛选字段"), "filter_value": prop("string", "等值筛选值"), "select_columns": listProp("string"), "sort_by": prop("string", "输出排序字段，聚合结果为 group 或 value"), "sort_order": map[string]any{"type": "string", "enum": []string{"asc", "desc"}}, "sort_numeric": prop("boolean", "select 模式是否按数值排序")}, "source", "group_by", "value", "operation", "output"),
@@ -80,7 +80,12 @@ func (b *boundTool) InvokableRun(ctx context.Context, raw string, _ ...tool.Opti
 		return "", errors.New("工具调用关联错误")
 	}
 	if p, _, _, err := b.e.load(b.s); err == nil {
-		if _, exists := p.Tasks[b.s.Task].Steps[b.s.Frame+"/"+b.call.ID]; exists {
+		task := p.Tasks[b.s.Task]
+		key := b.s.Frame + "/" + b.call.ID
+		_, executed := task.Steps[key]
+		disposition, closed := task.Dispositions[key]
+		closed = closed && disposition.Fact != nil && disposition.Fact.Disposition != "unknown"
+		if executed || closed {
 			return b.e.record(b.s, b.call, nil, func(*core.Project) (any, error) { return nil, nil })
 		}
 	}
@@ -286,9 +291,34 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 		if !ok {
 			return fail(errors.New("文件不存在"))
 		}
+		if file.Binary {
+			return fail(errors.New("此文件是二进制产物，请下载或用 check_artifacts 的内容断言检查，不能按文本读取"))
+		}
 		content, err := e.Store.Blob(s.Owner, file.Hash)
 		if err != nil {
 			return "", err
+		}
+		if offset, ok := a["offset"].(float64); ok {
+			if a["start_line"] != nil || a["end_line"] != nil {
+				return fail(errors.New("字节范围与行范围不能混用"))
+			}
+			limit := 16000
+			if n, ok := a["limit"].(float64); ok {
+				limit = int(n)
+			}
+			body, next, err := fileBytes(string(content), int(offset), limit)
+			if err != nil {
+				return fail(err)
+			}
+			return e.record(s, c, nil, func(p *core.Project) (any, error) {
+				material := core.WorkingMaterial{Resource: "file:" + str(a, "path"), Version: file.Hash, Source: s.Frame + "/" + c.ID, Content: body,
+					Segment: fmt.Sprintf("bytes:%d-%d", int(offset), next), Reason: "当前子目标依赖的文件字节片段", Recovery: fmt.Sprintf("read_file(path=%q,offset=%d)，hash=%s", str(a, "path"), next, file.Hash)}
+				retainMaterial(p.Tasks[s.Task].Frames[s.Frame], material)
+				return map[string]any{"path": str(a, "path"), "hash": file.Hash, "content": body, "offset": int(offset), "next_offset": next, "complete": next == len(content)}, nil
+			})
+		}
+		if a["limit"] != nil {
+			return fail(errors.New("按字节读取时须同时指定 offset"))
 		}
 		start, end := 1, 0
 		if n, ok := a["start_line"].(float64); ok {
@@ -302,10 +332,11 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 		}
 		body, first, last, complete := fileSlice(string(content), start, end)
 		if last < first {
-			return fail(errors.New("范围为空或单行超过 16000 字节，请缩小资源或使用分段格式"))
+			return fail(errors.New("范围为空或单行超过 16000 字节；超长单行请用 offset=0、limit=16000 分段读取，无需改写源文件"))
 		}
 		return e.record(s, c, nil, func(p *core.Project) (any, error) {
 			material := fileMaterial(str(a, "path"), file, body, s.Frame+"/"+c.ID)
+			material.Segment = fmt.Sprintf("%d-%d", first, last)
 			material.Reason = fmt.Sprintf("当前子目标依赖，第 %d–%d 行", first, last)
 			material.Recovery = fmt.Sprintf("read_file(path=%q,start_line=%d)，hash=%s", str(a, "path"), last+1, file.Hash)
 			retainMaterial(p.Tasks[s.Task].Frames[s.Frame], material)
@@ -327,6 +358,9 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 		}
 		sort.Strings(names)
 		for _, n := range names {
+			if p.Files[n].Binary {
+				continue
+			}
 			for i, line := range strings.Split(files[n], "\n") {
 				if strings.Contains(line, query) && len(hits) < 50 {
 					if len(line) > 500 {
@@ -375,7 +409,11 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 			}
 			delete(p.Files, str(a, "path"))
 			for _, frame := range p.Tasks[s.Task].Frames {
-				delete(frame.Materials, "file:"+str(a, "path"))
+				for key, material := range frame.Materials {
+					if material.Resource == "file:"+str(a, "path") {
+						delete(frame.Materials, key)
+					}
+				}
 			}
 			return "已从草稿移除，历史保留", nil
 		})
@@ -390,7 +428,14 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 	case "propose_plan":
 		return e.record(s, c, nil, func(p *core.Project) (any, error) {
 			task := p.Tasks[s.Task]
-			task.Plan = &core.Plan{Revision: core.ID(), Text: str(a, "plan"), Acceptance: stringsArg(a, "acceptance"), Approved: task.Mode == "build"}
+			delivery, err := decodeArgument[*core.DeliveryScope](a, "delivery")
+			if err != nil {
+				return nil, err
+			}
+			if err := validateDelivery(delivery, stringsArg(a, "acceptance")); err != nil {
+				return nil, err
+			}
+			task.Plan = &core.Plan{Delivery: delivery, Revision: core.ID(), Text: str(a, "plan"), Acceptance: stringsArg(a, "acceptance"), Approved: task.Mode == "build"}
 			if len(task.Plan.Acceptance) == 0 {
 				return nil, errors.New("计划必须列出验收条件")
 			}
@@ -401,14 +446,50 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 			return task.Plan, nil
 		})
 	case "check_artifacts":
-		files, err := e.Store.Files(s.Owner, p.Files)
+		manifest := core.Manifest{}
+		selected := stringsArg(a, "paths")
+		if len(selected) > 0 {
+			for _, name := range selected {
+				file, ok := p.Files[name]
+				if !ok {
+					return fail(fmt.Errorf("检查文件不存在：%s", name))
+				}
+				manifest[name] = file
+			}
+		} else {
+			manifest, err = deliveryManifest(p, t)
+			if err != nil {
+				return fail(err)
+			}
+		}
+		files, err := e.Store.Files(s.Owner, manifest)
 		if err != nil {
 			return "", err
 		}
-		report := checkArtifacts(files, p.Files)
+		assertions, err := decodeArgument[[]core.ArtifactAssertion](a, "assertions")
+		if err != nil {
+			return fail(err)
+		}
+		if err := validateAssertions(assertions); err != nil {
+			return fail(err)
+		}
+		report := checkArtifacts(files, manifest)
+		bytesByPath := map[string][]byte{}
+		for name, body := range files {
+			bytesByPath[name] = []byte(body)
+		}
+		for _, check := range artifactChecks(bytesByPath, assertions) {
+			report.Checks = append(report.Checks, check)
+			if check.Status == "failed" {
+				report.Status = "failed"
+			}
+		}
+		report.Evidence = evidenceFor(t, s, manifest, nil)
 		return e.record(s, c, nil, func(p *core.Project) (any, error) {
-			if p.Files.Digest() != report.Digest {
-				return nil, errors.New("检查期间文件变化")
+			for name, file := range manifest {
+				if p.Files[name] != file {
+					return nil, errors.New("检查期间文件变化")
+				}
 			}
 			p.Reports = append(p.Reports, report)
 			return report, nil
@@ -439,7 +520,7 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 			}
 			version := core.Version{ID: core.ID(), Number: len(p.Versions) + 1, TaskID: task.ID, At: core.Now(), Summary: str(a, "summary"), Manifest: core.Clone(p.Files)}
 			for _, report := range p.Reports {
-				if report.Digest == p.Files.Digest() {
+				if reportCurrent(p, task, report) {
 					version.Reports = append(version.Reports, report)
 				}
 			}

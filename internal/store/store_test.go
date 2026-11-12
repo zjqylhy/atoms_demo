@@ -1,11 +1,60 @@
 package store
 
 import (
+	"bytes"
 	"errors"
 	"mockatoms/internal/core"
 	"path/filepath"
 	"testing"
 )
+
+func TestSnapshotImportKeepsAllReferencedHistory(t *testing.T) {
+	filename := filepath.Join(t.TempDir(), "snapshot.db")
+	s, err := Open(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.Create("alice", "copy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs := map[string][]byte{}
+	manifest := func(text string) core.Manifest {
+		data := []byte(text)
+		blobs[core.Hash(data)] = data
+		return core.Manifest{"document.txt": {Hash: core.Hash(data), Size: len(data)}}
+	}
+	current, base, checkpoint, version := manifest("draft"), manifest("base"), manifest("checkpoint"), manifest("version")
+	orphan := []byte("unreferenced")
+	blobs[core.Hash(orphan)] = orphan
+	_, err = s.Mutate("alice", p.ID, blobs, func(p *core.Project) error {
+		p.Files = current
+		p.Tasks["task"] = &core.Task{Base: base, Checkpoints: []core.Checkpoint{{Manifest: checkpoint}}}
+		p.Versions = []core.Version{{Manifest: version}}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for _, text := range []string{"draft", "base", "checkpoint", "version"} {
+		data := []byte(text)
+		stored, err := s.Blob("alice", core.Hash(data))
+		if err != nil || !bytes.Equal(stored, data) {
+			t.Fatalf("lost referenced history %s: %v", text, err)
+		}
+	}
+	if _, err := s.Blob("alice", core.Hash(orphan)); err == nil {
+		t.Fatal("imported unreferenced blob")
+	}
+}
 
 func TestAtomicFileCheckpointFenceAndRestart(t *testing.T) {
 	filename := filepath.Join(t.TempDir(), "atoms.db")

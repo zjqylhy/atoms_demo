@@ -72,12 +72,27 @@ function validate(j) {
     Array.isArray(j.files)
   )
     throw Error("执行请求格式无效");
-  const entries = Object.entries(j.files);
+  const binary = Object.entries(j.binary_files || {});
+  for (const [name, value] of binary) {
+    if (
+      Object.hasOwn(j.files, name) ||
+      typeof value !== "string" ||
+      Buffer.from(value, "base64").toString("base64") !== value
+    )
+      throw Error("二进制文件编码或路径无效");
+  }
+  const entries = [
+    ...Object.entries(j.files).map(([name, value]) => [
+      name,
+      typeof value === "string" ? Buffer.from(value, "utf8") : value,
+    ]),
+    ...binary.map(([name, value]) => [name, Buffer.from(value, "base64")]),
+  ];
   if (entries.length > 100) throw Error("文件数量超限");
   let size = 0;
   for (const [n, v] of entries) {
     if (
-      typeof v !== "string" ||
+      !Buffer.isBuffer(v) ||
       Buffer.byteLength(v) > 262144 ||
       n.length > 180 ||
       n.startsWith("/") ||
@@ -158,7 +173,7 @@ async function run(job, name) {
     const timer = setTimeout(cancel, 120000);
     child.stdout.on("data", (b) => {
       out += b;
-      if (Buffer.byteLength(out) > 2097152) cancel();
+      if (Buffer.byteLength(out) > 4 * 1024 * 1024) cancel();
     });
     child.stderr.on("data", (b) => {
       err = (err + b).slice(-10000);
@@ -266,7 +281,8 @@ async function main() {
         send(res, 401, { error: "unauthorized" });
         return;
       }
-      const lookup = req.method === "GET" && /^\/jobs\/([a-f0-9]{64})$/.exec(req.url);
+      const lookup =
+        req.method === "GET" && /^\/jobs\/([a-f0-9]{64})$/.exec(req.url);
       if (lookup) {
         const id = lookup[1];
         const existing = await loadJob(id);
@@ -300,15 +316,23 @@ async function main() {
       // Hold the slot before reading disk so concurrent submissions cannot both
       // observe a missing record and start the same job.
       if (!active && !closing) {
-        ownedName = "atoms-job-" + job.id.slice(0, 16) + "-" + crypto.randomBytes(4).toString("hex");
+        ownedName =
+          "atoms-job-" +
+          job.id.slice(0, 16) +
+          "-" +
+          crypto.randomBytes(4).toString("hex");
         active = { name: ownedName, id: job.id, fingerprint };
       }
-      const existing = (await loadJob(job.id)) ||
+      const existing =
+        (await loadJob(job.id)) ||
         (!ownedName && active?.id === job.id ? active : undefined);
       if (existing) {
         if (ownedName) active = undefined;
         if (existing.fingerprint !== fingerprint) {
-          send(res, 409, { code: "job_conflict", error: "相同作业标识的内容发生变化" });
+          send(res, 409, {
+            code: "job_conflict",
+            error: "相同作业标识的内容发生变化",
+          });
         } else {
           sendJob(res, existing);
         }
@@ -328,7 +352,8 @@ async function main() {
       await save(job.id, record);
       const resultPromise = run(job, ownedName);
       const onClose = () => {
-        if (!res.writableEnded && active?.name === ownedName) active?.cancel?.();
+        if (!res.writableEnded && active?.name === ownedName)
+          active?.cancel?.();
       };
       res.once("close", onClose);
       if (res.destroyed || closing) onClose();

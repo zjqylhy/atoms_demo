@@ -349,6 +349,10 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 		w.Write(b)
 		return
 	}
+	if file.Binary {
+		send(w, 200, map[string]any{"path": name, "file": file, "content": "二进制产物，请下载查看。"})
+		return
+	}
 	send(w, 200, map[string]any{"path": name, "file": file, "content": string(b)})
 }
 func (s *Server) export(w http.ResponseWriter, r *http.Request) {
@@ -362,10 +366,14 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 404, err)
 		return
 	}
-	files, err := s.Store.Files(owner(r), manifest)
-	if err != nil {
-		s.fail(w, 500, errors.New("无法读取导出文件"))
-		return
+	files := map[string][]byte{}
+	for name, file := range manifest {
+		data, err := s.Store.Blob(owner(r), file.Hash)
+		if err != nil {
+			s.fail(w, 500, errors.New("无法读取导出文件"))
+			return
+		}
+		files[name] = data
 	}
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "atoms-project.zip"}))
@@ -376,7 +384,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			break
 		}
-		_, _ = io.WriteString(entry, content)
+		_, _ = entry.Write(content)
 	}
 	_ = z.Close()
 }

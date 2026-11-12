@@ -24,7 +24,7 @@ func (e *Engine) beginModelCall(s scope, role string, prepared preparedContext) 
 	if p.Runs[s.Run].Calls >= e.Config.MaxCalls {
 		return errors.New("达到本次模型调用上限，进度已保存")
 	}
-	if err := e.Store.ReserveCall(s.Owner, e.Config.DailyCalls, e.Config.WorkspaceDailyCalls); err != nil {
+	if err := e.Quota.ReserveCall(s.Owner, e.Config.DailyCalls, e.Config.WorkspaceDailyCalls); err != nil {
 		return err
 	}
 	_, err = e.Store.Mutate(s.Owner, s.Project, nil, func(p *core.Project) error {
