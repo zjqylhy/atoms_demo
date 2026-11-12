@@ -1,0 +1,263 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Atoms Lab · 已确认设计",
+    "output": ".archify/architecture-atoms-demo-20261111-173155/atoms-demo.html",
+    "quality_profile": "showcase",
+    "locale": "zh-CN"
+  },
+  "components": [
+    {
+      "id": "workbench",
+      "type": "frontend",
+      "label": "浏览器工作台",
+      "sublabel": "React · Build / Plan",
+      "pos": [
+        60,
+        90
+      ],
+      "size": [
+        290,
+        100
+      ]
+    },
+    {
+      "id": "control",
+      "type": "backend",
+      "label": "接口与任务控制",
+      "sublabel": "Go · 批准 / 停止 / 继续",
+      "pos": [
+        430,
+        90
+      ],
+      "size": [
+        290,
+        100
+      ]
+    },
+    {
+      "id": "storage",
+      "type": "database",
+      "label": "持久状态与产物",
+      "sublabel": "SQLite · 文件 / 检查点 / 事件",
+      "pos": [
+        800,
+        90
+      ],
+      "size": [
+        290,
+        100
+      ]
+    },
+    {
+      "id": "viewer",
+      "type": "frontend",
+      "label": "按类型查看产物",
+      "sublabel": "隔离网页 / 文档 / 数据 / 代码",
+      "pos": [
+        60,
+        390
+      ],
+      "size": [
+        290,
+        100
+      ]
+    },
+    {
+      "id": "executor",
+      "type": "backend",
+      "label": "角色与工具执行",
+      "sublabel": "Eino 工具节点 · 应用管理恢复",
+      "pos": [
+        430,
+        390
+      ],
+      "size": [
+        290,
+        100
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "security",
+      "label": "模型通信适配器",
+      "sublabel": "双协议 · JSON 动作适配",
+      "pos": [
+        800,
+        390
+      ],
+      "size": [
+        290,
+        100
+      ]
+    },
+    {
+      "id": "model",
+      "type": "external",
+      "label": "现有 LLM 网关",
+      "sublabel": "服务端环境变量 · chat",
+      "pos": [
+        800,
+        680
+      ],
+      "size": [
+        290,
+        100
+      ]
+    },
+    {
+      "id": "runner",
+      "type": "backend",
+      "label": "私有执行服务",
+      "sublabel": "仅回环访问 · 作业去重与限流",
+      "pos": [
+        430,
+        680
+      ],
+      "size": [
+        290,
+        100
+      ]
+    },
+    {
+      "id": "sandbox",
+      "type": "security",
+      "label": "受限代码执行容器",
+      "sublabel": "gVisor · Node / Chromium",
+      "pos": [
+        430,
+        960
+      ],
+      "size": [
+        290,
+        100
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "requests",
+      "from": "workbench",
+      "to": "control",
+      "label": "请求 / 进度",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "persist",
+      "from": "control",
+      "to": "storage",
+      "label": "事务保存",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "dispatch",
+      "from": "control",
+      "to": "executor",
+      "label": "调度 / 步骤回写",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "view",
+      "from": "workbench",
+      "to": "viewer",
+      "label": "查看 / 导出",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "call",
+      "from": "executor",
+      "to": "gateway",
+      "label": "工具调用循环",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "provider",
+      "from": "gateway",
+      "to": "model",
+      "label": "HTTPS · 工具与结果",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "execute",
+      "from": "executor",
+      "to": "runner",
+      "label": "真实运行 / 测试报告",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "isolate",
+      "from": "runner",
+      "to": "sandbox",
+      "label": "无外网 / 限时限资源",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "两种构建模式",
+      "items": [
+        "Build：信息足够后直接实施",
+        "Plan：先保存计划，批准当前修订后实施",
+        "模式随请求保存；重复批准只执行一次"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "五个角色，按任务需要调用",
+      "items": [
+        "Mike 协调 · Emma 产品 · Bob 架构",
+        "Alex 工程 · David 分析",
+        "交接目标、范围、文件引用、检查与待办"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "中断后保留已完成工作",
+      "items": [
+        "文件、步骤结果与检查点一起提交",
+        "继续创建新运行，接着已保存的进度工作",
+        "旧运行迟到结果无法覆盖新状态"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "环境变量接入模型",
+      "items": [
+        "Chat Completions / Responses 协议适配",
+        "当前网关用 JSON 动作，校验后执行",
+        "密钥不入库；没有访客设置页面"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "产物范围与限制",
+      "items": [
+        "网页、文档、Node 脚本、表格与图表",
+        "固定依赖；无任意宿主 Shell 或外部接口",
+        "构建、实际运行、桌面与手机断言"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "设计与验收分开记录",
+      "items": [
+        "本图是已确认设计，不是上线验收证明",
+        "关闭网页不停止后台任务",
+        "源码未提交；实际结果见实施记录"
+      ]
+    }
+  ]
+}

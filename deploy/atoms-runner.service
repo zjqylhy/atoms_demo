@@ -1,0 +1,25 @@
+[Unit]
+Description=Atoms Lab private isolated execution controller
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+WorkingDirectory=/opt/atoms_lab
+EnvironmentFile=/etc/atoms-lab/runner.env
+Environment=PATH=/opt/atoms_lab/runtime/node-v24.21.0-linux-x64/bin:/usr/bin:/bin
+ExecStart=/opt/atoms_lab/runtime/node-v24.21.0-linux-x64/bin/node /opt/atoms_lab/current/runner/server.cjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/atoms_lab/runner-data
+MemoryMax=160M
+CPUQuota=25%
+TasksMax=64
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

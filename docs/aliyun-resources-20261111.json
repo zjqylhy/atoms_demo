@@ -1,0 +1,172 @@
+{
+  "kind": "read-only-snapshot",
+  "captured": "2026-11-11T11:31:00Z",
+  "servers": [
+    {
+      "host": "8.155.128.79",
+      "time": {
+        "code": 0,
+        "out": "2026-11-11T11:31:21Z",
+        "error": ""
+      },
+      "cpu_count": 2,
+      "cpu_busy_sample": 31.6,
+      "load": [
+        0.35302734375,
+        0.20751953125,
+        0.1396484375
+      ],
+      "mem": {
+        "MemTotal": "1778592 kB",
+        "MemAvailable": "914480 kB",
+        "SwapTotal": "4194300 kB",
+        "SwapFree": "3956972 kB"
+      },
+      "disk": {
+        "total": 41882943488,
+        "free": 809897984
+      },
+      "kernel": {
+        "code": 0,
+        "out": "Linux 5.15.0-191-generic x86_64 GNU/Linux",
+        "error": ""
+      },
+      "docker_info": {
+        "code": 0,
+        "out": "io.containerd.runc.v2 runc",
+        "error": ""
+      },
+      "containers": {
+        "code": 0,
+        "out": "olist-python-agent-web-1 | olist-python-web:public-security-98663af | Up 2 days | 80/tcp, 127.0.0.1:8088->8080/tcp\nolist-python-agent-worker-1 | push-analysis-platform:a43cf6f9a316c0145cca8cd54658d50782beb349 | Up 12 days | 8080/tcp\nolist-python-agent-api-1 | push-analysis-platform:a43cf6f9a316c0145cca8cd54658d50782beb349 | Up 12 days (healthy) | 8080/tcp\nolist-python-agent-postgres-1 | postgres:17-alpine | Up 3 weeks (healthy) | 5432/tcp",
+        "error": ""
+      },
+      "usage": {
+        "code": 0,
+        "out": "olist-python-agent-web-1 | 0.00% | 3.867MiB / 64MiB | 3\nolist-python-agent-worker-1 | 0.40% | 10.98MiB / 384MiB | 5\nolist-python-agent-api-1 | 0.14% | 69.06MiB / 256MiB | 6\nolist-python-agent-postgres-1 | 0.33% | 46.55MiB / 320MiB | 8",
+        "error": ""
+      },
+      "storage": {
+        "code": 0,
+        "out": "TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE\nImages          87        4         1.673GB   478.8MB (28%)\nContainers      6         4         40.96kB   8.192kB (20%)\nLocal Volumes   7         1         13.07GB   1.253GB (9%)\nBuild Cache     14        0         95.68MB   888.8kB",
+        "error": ""
+      },
+      "kvm": false,
+      "runsc": {
+        "code": 0,
+        "out": "",
+        "error": ""
+      }
+    },
+    {
+      "host": "47.113.231.252",
+      "time": {
+        "code": 0,
+        "out": "2026-11-11T11:31:51Z",
+        "error": ""
+      },
+      "cpu_count": 2,
+      "cpu_busy_sample": 6.6,
+      "load": [
+        1.2021484375,
+        1.0556640625,
+        0.79052734375
+      ],
+      "mem": {
+        "MemTotal": "3714280 kB",
+        "MemAvailable": "1716700 kB",
+        "SwapTotal": "0 kB",
+        "SwapFree": "0 kB"
+      },
+      "disk": {
+        "total": 63017381888,
+        "free": 38615347200
+      },
+      "kernel": {
+        "code": 0,
+        "out": "Linux 6.8.0-139-generic x86_64 GNU/Linux",
+        "error": ""
+      },
+      "docker_info": {
+        "code": 0,
+        "out": "io.containerd.runc.v2 runc",
+        "error": ""
+      },
+      "containers": {
+        "code": 0,
+        "out": "llm-gateway-lite-admin-1 | llm-gateway:public-security-136b560 | Up 2 days | 8080-8082/tcp\nllm-gateway-lite-edge-1 | public.ecr.aws/docker/library/caddy:2.10 | Up 2 weeks | 0.0.0.0:80->80/tcp, [::]:80->80/tcp, 0.0.0.0:443->443/tcp, [::]:443->443/tcp, 443/udp, 2019/tcp\nllm-gateway-lite-grafana-1 | llm-gateway:grafana-13.2.3-verified | Up 3 weeks | 127.0.0.1:3000->3000/tcp\nllm-gateway-lite-gateway-1 | llm-gateway:outbox-background-20261018-1f814e4 | Up 3 weeks | 8080-8082/tcp\nllm-gateway-lite-worker-1 | llm-gateway:outbox-background-20261018-1f814e4 | Up 3 weeks | 8080-8082/tcp\nllm-gateway-lite-prometheus-1 | llm-gateway:prometheus-3.5.0-verified | Up 3 weeks | 8080-8082/tcp\nllm-gateway-lite-redis-1 | redis:7.4 | Up 4 weeks (healthy) | 6379/tcp\nllm-gateway-lite-mysql-1 | mysql:8.4 | Up 4 weeks (healthy) | 3306/tcp, 33060/tcp\nllm-gateway-lite-kafka-1 | apache/kafka:4.0.2 | Up 4 weeks (healthy) | 9092/tcp\nllm-gateway-lite-etcd-1 | quay.io/coreos/etcd:v3.5.21 | Up 4 weeks (healthy) | 2379-2380/tcp",
+        "error": ""
+      },
+      "usage": {
+        "code": 0,
+        "out": "llm-gateway-lite-admin-1 | 0.11% | 21.27MiB / 256MiB | 9\nllm-gateway-lite-edge-1 | 0.00% | 21.19MiB / 128MiB | 9\nllm-gateway-lite-grafana-1 | 0.45% | 248.5MiB / 512MiB | 110\nllm-gateway-lite-gateway-1 | 0.31% | 23.18MiB / 256MiB | 10\nllm-gateway-lite-worker-1 | 0.56% | 24.63MiB / 256MiB | 12\nllm-gateway-lite-prometheus-1 | 0.00% | 52.8MiB / 256MiB | 8\nllm-gateway-lite-redis-1 | 0.40% | 7.188MiB / 256MiB | 7\nllm-gateway-lite-mysql-1 | 1.44% | 382.6MiB / 768MiB | 44\nllm-gateway-lite-kafka-1 | 164.00% | 611.8MiB / 1GiB | 117\nllm-gateway-lite-etcd-1 | 0.73% | 40.52MiB / 256MiB | 10",
+        "error": ""
+      },
+      "storage": {
+        "code": 0,
+        "out": "TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE\nImages          30        9         8.47GB    2.078GB (24%)\nContainers      11        10        35.1MB    290.8kB (0%)\nLocal Volumes   12        12        6.203GB   0B (0%)\nBuild Cache     0         0         0B        0B",
+        "error": ""
+      },
+      "kvm": false,
+      "runsc": {
+        "code": 0,
+        "out": "",
+        "error": ""
+      }
+    },
+    {
+      "host": "8.155.133.72",
+      "time": {
+        "code": 0,
+        "out": "2026-11-11T11:31:50Z",
+        "error": ""
+      },
+      "cpu_count": 2,
+      "cpu_busy_sample": 1,
+      "load": [
+        0.35,
+        0.37,
+        0.36
+      ],
+      "mem": {
+        "MemTotal": "1915888 kB",
+        "MemAvailable": "1309392 kB",
+        "SwapTotal": "4194300 kB",
+        "SwapFree": "3568896 kB"
+      },
+      "disk": {
+        "total": 41881894912,
+        "free": 23375314944
+      },
+      "kernel": {
+        "code": 0,
+        "out": "Linux 5.10.134-19.8.al8.x86_64 x86_64 GNU/Linux",
+        "error": ""
+      },
+      "docker_info": {
+        "code": 0,
+        "out": "io.containerd.runc.v2 runc",
+        "error": ""
+      },
+      "containers": {
+        "code": 0,
+        "out": "it-helpdesk-python-web-1 | helpdesk-python-web:public-security-ddc7244 | Up 2 days (healthy) | 127.0.0.1:3000->80/tcp\nit-helpdesk-python-worker-1 | helpdesk-python:8d260bd | Up 2 weeks | \nit-helpdesk-python-api-1 | helpdesk-python:8d260bd | Up 2 weeks (healthy) | \nit-helpdesk-python-db-1 | pgvector/pgvector:pg17 | Up 3 weeks (healthy) | 127.0.0.1:55534->5432/tcp\nit-helpdesk-rag-rewrite-m3-web-1 | helpdesk-rewrite-web:cb413c9 | Up 3 weeks | 127.0.0.1:3001->80/tcp\nit-helpdesk-rag-rewrite-m3-api-1 | helpdesk-rewrite:cb413c9 | Up 3 weeks (healthy) | \nit-helpdesk-rag-rewrite-m3-worker-1 | helpdesk-rewrite:cb413c9 | Up 3 weeks | \nit-helpdesk-rag-rewrite-m3-db-1 | pgvector/pgvector:pg17 | Up 3 weeks (healthy) | 5432/tcp\nit-helpdesk-rag-cloud-db-1 | pgvector/pgvector:pg17 | Up 4 weeks (healthy) | 127.0.0.1:55533->5432/tcp",
+        "error": ""
+      },
+      "usage": {
+        "code": 0,
+        "out": "it-helpdesk-python-web-1 | 0.00% | 4.086MiB / 64MiB | 3\nit-helpdesk-python-worker-1 | 0.12% | 11.96MiB / 256MiB | 2\nit-helpdesk-python-api-1 | 0.13% | 33.11MiB / 512MiB | 4\nit-helpdesk-python-db-1 | 0.59% | 20.95MiB / 256MiB | 10\nit-helpdesk-rag-rewrite-m3-web-1 | 0.00% | 248KiB / 64MiB | 3\nit-helpdesk-rag-rewrite-m3-api-1 | 0.17% | 19.79MiB / 512MiB | 3\nit-helpdesk-rag-rewrite-m3-worker-1 | 0.01% | 2.707MiB / 256MiB | 2\nit-helpdesk-rag-rewrite-m3-db-1 | 6.48% | 14.89MiB / 256MiB | 9\nit-helpdesk-rag-cloud-db-1 | 0.00% | 9.723MiB / 1.827GiB | 6",
+        "error": ""
+      },
+      "storage": {
+        "error": "Command '['docker', 'system', 'df']' timed out after 12 seconds"
+      },
+      "kvm": false,
+      "runsc": {
+        "code": 0,
+        "out": "",
+        "error": ""
+      }
+    }
+  ]
+}

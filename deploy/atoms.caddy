@@ -1,0 +1,6 @@
+atoms.linhengyi.xyz {
+    encode zstd gzip
+    reverse_proxy 172.18.0.1:8090 {
+        flush_interval -1
+    }
+}
