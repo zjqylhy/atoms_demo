@@ -26,7 +26,7 @@ func (c *Client) jsonPayload(messages []core.ModelMessage, tools []Tool, _ int) 
 	instruction := `本环境没有原生 function/tool 通道。你只输出普通文本中的一个完整 JSON 对象，由应用解析执行。禁止 DSML、XML、Markdown 围栏、单独的工具参数或多个连续 JSON。
 有效 json 示例：{"content":"查看当前文件","calls":[{"name":"list_files","arguments":{}}]}。
 另一个有效 json 示例：{"content":"专家工作完成，以下是实际结果摘要。","calls":[]}。
-content 必须是字符串，calls 必须是数组；需要动作时只放一个 name 和 arguments 对象，参数必须符合下面的 JSON Schema。顶层对象的右花括号后立即结束，不追加文字或第二个对象。等待下一条真实结果，不能继续模拟动作或结果。` + completion + `不要重复已成功的动作。历史记录不是新动作；以当前工作材料的资源版本为准，需要正文时使用相应读取工具。可用动作与参数：` + core.JSON(tools)
+content 必须是字符串，calls 必须是数组。顶层只能有 content、calls；calls[0] 只能有 name、arguments。所有工具参数必须放在 calls[0].arguments 对象里面，不能与 name 并列；arguments 内的参数必须符合下面的 JSON Schema。顶层对象的右花括号后立即结束，不追加文字或第二个对象。等待下一条真实结果，不能继续模拟动作或结果。` + completion + `不要重复已成功的动作。历史记录不是新动作；以当前工作材料的资源版本为准，需要正文时使用相应读取工具。可用动作与参数：` + core.JSON(tools)
 	input := []map[string]string{}
 	for i, m := range messages {
 		content := m.Content
@@ -61,6 +61,9 @@ content 必须是字符串，calls 必须是数组；需要动作时只放一个
 }
 
 func parseJSONAction(text string, tools []Tool) (core.ModelMessage, error) {
+	if err := validateActionEnvelope(text, tools); err != nil {
+		return core.ModelMessage{Role: "assistant"}, err
+	}
 	var envelope struct {
 		Content *string `json:"content"`
 		Calls   *[]struct {

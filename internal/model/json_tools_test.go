@@ -62,3 +62,23 @@ func TestJSONEncoderPreservesSelectedEvidence(t *testing.T) {
 		}
 	}
 }
+
+func TestJSONEnvelopeFeedbackLocatesMisplacedToolArguments(t *testing.T) {
+	for _, name := range []string{"assign_step", "renamed_action"} {
+		tools := []Tool{{Name: name, Parameters: map[string]any{"type": "object", "properties": map[string]any{"role": map[string]any{"type": "string"}, "goal": map[string]any{"type": "string"}}}}}
+		bad := `{"content":"delegate","calls":[{"name":"` + name + `","role":"Alex","goal":"check the saved input"}]}`
+		message, err := parseJSONAction(bad, tools)
+		if err == nil || len(message.ToolCalls) != 0 {
+			t.Fatal("invalid argument nesting was executed", message, err)
+		}
+		for _, want := range []string{"$.calls[0].role", "$.calls[0].arguments.role", "$.calls[0].arguments 缺失", "允许字段：name, arguments", `"name":"` + name + `"`, `"arguments":{}`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("repair feedback omitted %q: %v", want, err)
+			}
+		}
+		correct := `{"content":"delegate","calls":[{"name":"` + name + `","arguments":{"role":"Alex","goal":"check the saved input"}}]}`
+		if fixed, err := parseJSONAction(correct, tools); err != nil || len(fixed.ToolCalls) != 1 {
+			t.Fatal("corrected nesting rejected", fixed, err)
+		}
+	}
+}
