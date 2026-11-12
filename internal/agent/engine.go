@@ -149,6 +149,7 @@ func (e *Engine) Start(owner, id, text, mode, requestID, action, decisionID stri
 				p.Event("model_changed", "system", "本次继续使用当前部署模型配置，已保存产物保留", nil)
 			}
 		}
+		restoreFileMaterials(p, t)
 		p.Epoch++
 		p.ActiveRun = runID
 		t.Status = "running"
@@ -607,7 +608,7 @@ func instructions(role string, p *core.Project, t *core.Task) string {
 Mike：Plan 必须先 propose_plan 等批准；可先 assign_step 给 Emma 整理需求，但未批准不得让专家实施目标代码/计算。Build 信息足够直接 assign_step。产品需求文档优先 Emma，技术设计优先 Bob，代码和脚本交给 Alex，表格计算交给 David；简单任务不调用无关角色。必要才 ask_user。审批、分派、提问、结束工具每次单独调用。专家不委派其他角色。
 运行中收到用户指令时按发送顺序理解，冲突以最新明确指令为准。Mike 核对已有文件和工具结果，调整主线及后续分派。Plan 模式下，如果新指令改变已批准的范围或验收条件，先用 propose_plan 提交修订等待批准，再分派实施或交付。
 网页优先生成 index.html、app.js、style.css 等自包含文件；支持本地资源，禁止外部 URL/依赖下载/真实外部接口。预览是独立无同源权限的页面：不使用 localStorage、Cookie、网络请求；应用状态保存在内存。支持 JavaScript、TypeScript、Python 脚本和含根目录 go.mod 的 Go 模块；Python 使用标准库，Go 使用标准库或项目自带依赖。也可生成 Markdown、CSV、图表。未支持的语言只能交付源码并明确未运行。
-每次只写一个简短文件，HTML、样式、逻辑分文件编写；单个写文件动作的内容尽量不超过 4000 字符，避免响应被输出限制截断。解释简洁，先完成可验证的最小功能，再改进样式。
+按职责拆分文件；完整替换必须提供全部正文，不得为了缩短输出丢掉原内容。大文件用 replace_text 分次局部修改，避免模型输出截断。解释简洁，先完成可验证的最小功能，再改进样式。
 写入工具已返回 saved 和 hash 即代表文件已持久保存，不要仅为确认写入而重复读取。需要修改旧文件、核对未知内容时才读取文件。
 当前摘要匹配的已通过检查可以复用，不要重复同类检查。编写浏览器断言前读取相关 HTML/JS 确定实际选择器，禁止猜测元素 ID、类型或文案。
 验收以用户当前需求和已批准计划为准，不新增用户未要求的列名、目录等约束。analyze_table 聚合结果固定为 group,value 两列，表示分组和数值，可直接交付；用户说按 category 汇总 amount 不等于要求输出同名列。不得因自行推断的列名约束改写计算结果，也不得让 Alex 手工编造图表来源 hash。

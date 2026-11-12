@@ -86,7 +86,7 @@ func TestDialogueSummaryHardLimitBoundary(t *testing.T) {
 				}
 				if strings.Contains(wire, "你负责合并旧对话摘要") {
 					summaries.Add(1)
-					if !strings.Contains(wire, "OLD_USER") || !strings.Contains(wire, "OLD_ASSISTANT") || strings.Contains(wire, "LATEST_USER") {
+					if strings.Contains(wire, "OLD_USER") || !strings.Contains(wire, "OLD_ASSISTANT") || strings.Contains(wire, "LATEST_USER") {
 						t.Error("summary request should include only old dialogue")
 					}
 					writeDialogueReply(w, `{"items":[{"kind":"suggestion","text":"可兼容 CSV","sources":["frame:2"]}]}`)
@@ -100,7 +100,7 @@ func TestDialogueSummaryHardLimitBoundary(t *testing.T) {
 					if len(body) != limit || !strings.Contains(wire, "OLD_USER") || !strings.Contains(wire, "OLD_ASSISTANT") {
 						t.Errorf("boundary should send the original dialogue at exactly %d bytes, got %d", limit, len(body))
 					}
-				} else if !strings.Contains(wire, "可兼容 CSV") || strings.Contains(wire, "OLD_ASSISTANT") || strings.Contains(wire, "OLD_USER") {
+				} else if !strings.Contains(wire, "可兼容 CSV") || strings.Contains(wire, "OLD_ASSISTANT") || !strings.Contains(wire, "OLD_USER") {
 					t.Error("formal request did not substitute the saved summary")
 				}
 				writeDialogueReply(w, finishDialogueTask)
@@ -127,7 +127,7 @@ func TestDialogueSummaryBatchesAndResume(t *testing.T) {
 		t.Run(fmt.Sprintf("中断=%t", interrupt), func(t *testing.T) {
 			const limit = 16 * 1024
 			fixture, task, frame := dialogueFixture([]core.ModelMessage{
-				{Role: "user", Content: "FIRST_ONLY: " + strings.Repeat("甲", 4000)},
+				{Role: "assistant", Content: "FIRST_ONLY: " + strings.Repeat("甲", 4000)},
 				{Role: "assistant", Content: "LARGE_REPLY: " + strings.Repeat("乙", 10000)},
 				{Role: "assistant", Content: "THIRD_REPLY: " + strings.Repeat("丙", 4000)},
 			})
@@ -152,7 +152,7 @@ func TestDialogueSummaryBatchesAndResume(t *testing.T) {
 						<-r.Context().Done()
 						return
 					}
-					writeDialogueReply(w, `{"items":[{"kind":"requirement","text":"保留旧用户约束","sources":["frame:1"]}]}`)
+					writeDialogueReply(w, `{"items":[{"kind":"suggestion","text":"保留旧用户约束","sources":["frame:1"]}]}`)
 					return
 				}
 				formal.Add(1)

@@ -25,20 +25,12 @@ type preparedContext struct {
 // Prepare against the serialized request, then keep the same bytes for admission and transport.
 func prepareFrameContext(client *model.Client, p *core.Project, task *core.Task, frame *core.Frame, tools []model.Tool) (preparedContext, error) {
 	system := core.ModelMessage{Role: "system", Content: instructions(frame.Role, p, task)}
-	if client.Config.ToolMode != "json" {
-		full := fullFrameContext(p, task, frame)
-		request, err := client.PrepareRequest(full, tools, len(full))
-		if err == nil {
-			err = client.ValidateRequest(request)
-		}
-		return preparedContext{request: request}, err
-	}
-
 	summary := frame.Context
 	if summary != nil && (summary.Through < 1 || summary.Through > len(frame.Messages)) {
 		summary = nil
 	}
 	history := newContextHistory(system, frame.Messages, taskRequirements(p, task))
+	history.materials = materialMessages(p, frame)
 	encode := func(summary *core.ContextSummary) (model.PreparedRequest, error) {
 		messages, completeFrom := history.project(summary, frame.Dialogue)
 		return client.PrepareRequest(messages, tools, completeFrom)
@@ -117,10 +109,9 @@ type contextRequirement struct {
 }
 
 func fullFrameContext(p *core.Project, task *core.Task, frame *core.Frame) []core.ModelMessage {
-	messages := append([]core.ModelMessage{{Role: "system", Content: instructions(frame.Role, p, task)}}, frame.Messages...)
-	if len(task.InstructionMessages) != 0 {
-		messages = append(messages, requirementMessage(taskRequirements(p, task)))
-	}
+	h := newContextHistory(core.ModelMessage{Role: "system", Content: instructions(frame.Role, p, task)}, frame.Messages, taskRequirements(p, task))
+	h.materials = materialMessages(p, frame)
+	messages, _ := h.project(nil, nil)
 	return messages
 }
 
@@ -147,7 +138,7 @@ func taskRequirements(p *core.Project, task *core.Task) []contextRequirement {
 			out = append(out, contextRequirement{Source: fmt.Sprintf("user:%d", index), Kind: instructionKind, Text: m.Text})
 			continue
 		}
-		if m.At < started || m.Role != "user" || (m.Kind != "answer" && m.Kind != "plan_feedback") {
+		if m.At < started || m.Role != "user" || (m.Kind != "answer" && m.Kind != "plan_feedback" && m.Kind != "approval") {
 			continue
 		}
 		for eventIndex < len(p.Events) && p.Events[eventIndex].At <= m.At {

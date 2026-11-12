@@ -31,11 +31,11 @@ func def(name, desc string, fields map[string]any, required ...string) model.Too
 func definitions(role string) []model.Tool {
 	all := []model.Tool{
 		def("list_files", "查看当前项目文件和内容摘要", map[string]any{}),
-		def("read_file", "读取项目文件，修改时使用返回的 hash", map[string]any{"path": prop("string", "相对路径")}, "path"),
+		def("read_file", "分行读取项目文件，修改时使用返回的 hash；截取时按 next_line 继续读取", map[string]any{"path": prop("string", "相对路径"), "start_line": prop("integer", "起始行，默认 1"), "end_line": prop("integer", "结束行，默认到末尾；每次最多 16000 字节")}, "path"),
 		def("search_files", "在项目文本中搜索字面文本，最多返回 50 处", map[string]any{"query": prop("string", "搜索文本")}, "query"),
 		def("check_artifacts", "执行真实结构、语法及格式检查，结果不代替运行测试", map[string]any{}),
 	}
-	writes := map[string]any{"path": prop("string", "相对路径"), "content": prop("string", "完整 UTF-8 文件内容"), "old_hash": prop("string", "已有文件的 hash；创建新文件填空字符串")}
+	writes := map[string]any{"path": prop("string", "相对路径"), "content": prop("string", "全部 UTF-8 内容，保存会完整替换文件；局部片段请使用局部编辑工具"), "old_hash": prop("string", "已有文件的 hash；创建新文件填空字符串")}
 	switch role {
 	case "Mike":
 		all = append(all,
@@ -49,7 +49,7 @@ func definitions(role string) []model.Tool {
 		all = append(all, def("write_document", "保存技术设计 Markdown 或文本", writes, "path", "content", "old_hash"))
 	case "Alex":
 		all = append(all,
-			def("write_file", "保存代码或项目文件，拒绝覆盖意外变化", writes, "path", "content", "old_hash"),
+			def("write_file", "完整替换文件，必须提供全部内容；不得把片段当完整文件。局部修改或大文件分次修改用 replace_text，拒绝覆盖意外变化", writes, "path", "content", "old_hash"),
 			def("replace_text", "按旧摘要精确替换，匹配次数必须等于 expected_count", map[string]any{"path": prop("string", "文件路径"), "old_hash": prop("string", "文件当前摘要"), "old_text": prop("string", "待替换文字"), "new_text": prop("string", "新文字"), "expected_count": prop("integer", "预期匹配次数")}, "path", "old_hash", "old_text", "new_text", "expected_count"),
 			def("delete_file", "只从当前草稿中移除文件，保留历史", map[string]any{"path": prop("string", "路径"), "old_hash": prop("string", "文件当前摘要")}, "path", "old_hash"),
 			def("run_project", "在隔离环境真实构建网页、运行 JavaScript/TypeScript/Python 脚本或编译并测试 Go 模块。kind=go 时使用 go.mod；kind=script 必填 expected_stdout，工作目录为临时目录，项目文件按脚本位置解析", map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"web", "script", "go"}}, "entry": prop("string", "网页 index.html、脚本相对路径或根目录 go.mod"), "args": listProp("string"), "expected_stdout": prop("string", "kind=script 必填，去除首尾空白后精确比较；其他类型省略")}, "kind", "entry"),
@@ -86,48 +86,77 @@ func (b *boundTool) InvokableRun(ctx context.Context, raw string, _ ...tool.Opti
 	}
 	return b.e.execute(ctx, b.s, b.call, args)
 }
-func validateArgs(a map[string]any, s map[string]any) error {
-	props := s["properties"].(map[string]any)
-	for k, v := range a {
-		p, ok := props[k]
-		if !ok {
-			return fmt.Errorf("未知参数 %s", k)
+
+// Feedback is derived from the same schema exposed to the model.
+func validateArgs(a map[string]any, schema map[string]any) error {
+	if a == nil {
+		return errors.New("参数必须是非 null 对象")
+	}
+	props := schema["properties"].(map[string]any)
+	allowed := make([]string, 0, len(props))
+	for key := range props {
+		allowed = append(allowed, key)
+	}
+	sort.Strings(allowed)
+	var problems []string
+	for key, value := range a {
+		spec, exists := props[key]
+		if !exists {
+			problems = append(problems, "未知参数 "+key)
+			continue
 		}
-		spec := p.(map[string]any)
-		kind := spec["type"].(string)
-		valid := false
-		switch kind {
-		case "string":
-			_, valid = v.(string)
-		case "boolean":
-			_, valid = v.(bool)
-		case "integer":
-			n, ok := v.(float64)
-			valid = ok && n == float64(int64(n))
-		case "array":
-			_, valid = v.([]any)
-		case "object":
-			_, valid = v.(map[string]any)
-		}
-		if !valid {
-			return fmt.Errorf("参数 %s 类型无效", k)
-		}
-		if allowed, ok := spec["enum"].([]string); ok {
-			found := false
-			for _, item := range allowed {
-				if v == item {
-					found = true
-				}
-			}
-			if !found {
-				return fmt.Errorf("参数 %s 不在允许范围", k)
-			}
+		if err := validateValue(value, spec.(map[string]any)); err != nil {
+			problems = append(problems, key+"："+err.Error())
 		}
 	}
-	for _, k := range s["required"].([]string) {
-		if _, ok := a[k]; !ok {
-			return fmt.Errorf("缺少参数 %s", k)
+	for _, key := range schema["required"].([]string) {
+		if _, exists := a[key]; !exists {
+			problems = append(problems, "缺少参数 "+key)
 		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	sort.Strings(problems)
+	return fmt.Errorf("%s；允许字段：%s；必填字段：%s", strings.Join(problems, "；"), strings.Join(allowed, ", "), strings.Join(schema["required"].([]string), ", "))
+}
+func validateValue(v any, spec map[string]any) error {
+	valid := false
+	switch spec["type"] {
+	case "string":
+		_, valid = v.(string)
+	case "boolean":
+		_, valid = v.(bool)
+	case "integer":
+		n, ok := v.(float64)
+		valid = ok && n == float64(int64(n))
+	case "array":
+		items, ok := v.([]any)
+		valid = ok
+		if ok {
+			for i, item := range items {
+				if err := validateValue(item, spec["items"].(map[string]any)); err != nil {
+					return fmt.Errorf("第 %d 项：%w", i+1, err)
+				}
+			}
+		}
+	case "object":
+		object, ok := v.(map[string]any)
+		valid = ok
+		if ok {
+			return validateArgs(object, spec)
+		}
+	}
+	if !valid {
+		return fmt.Errorf("类型无效，要求 %s", spec["type"])
+	}
+	if allowed, ok := spec["enum"].([]string); ok {
+		for _, item := range allowed {
+			if v == item {
+				return nil
+			}
+		}
+		return fmt.Errorf("允许值：%s", strings.Join(allowed, ", "))
 	}
 	return nil
 }
@@ -250,8 +279,26 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 		if err != nil {
 			return "", err
 		}
-		return e.record(s, c, nil, func(*core.Project) (any, error) {
-			return map[string]any{"path": str(a, "path"), "hash": file.Hash, "content": string(content)}, nil
+		start, end := 1, 0
+		if n, ok := a["start_line"].(float64); ok {
+			start = int(n)
+		}
+		if n, ok := a["end_line"].(float64); ok {
+			end = int(n)
+		}
+		if start < 1 || end < 0 || (end > 0 && end < start) {
+			return fail(errors.New("读取行范围无效"))
+		}
+		body, first, last, complete := fileSlice(string(content), start, end)
+		if last < first {
+			return fail(errors.New("范围为空或单行超过 16000 字节，请缩小资源或使用分段格式"))
+		}
+		return e.record(s, c, nil, func(p *core.Project) (any, error) {
+			material := fileMaterial(str(a, "path"), file, body, s.Frame+"/"+c.ID)
+			material.Reason = fmt.Sprintf("当前子目标依赖，第 %d–%d 行", first, last)
+			material.Recovery = fmt.Sprintf("read_file(path=%q,start_line=%d)，hash=%s", str(a, "path"), last+1, file.Hash)
+			retainMaterial(p.Tasks[s.Task].Frames[s.Frame], material)
+			return map[string]any{"path": str(a, "path"), "hash": file.Hash, "content": body, "start_line": first, "end_line": last, "complete": complete, "next_line": last + 1}, nil
 		})
 	case "search_files":
 		query := str(a, "query")
@@ -306,6 +353,7 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 			if err := write(p, name, content, str(a, "old_hash"), c.Function.Name == "write_document"); err != nil {
 				return nil, err
 			}
+			rememberFile(p, s, c, name, content)
 			return map[string]any{"path": name, "hash": hash, "saved": true}, nil
 		})
 	case "delete_file":
@@ -315,6 +363,9 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 				return nil, errors.New("文件不存在、只读或已变化")
 			}
 			delete(p.Files, str(a, "path"))
+			for _, frame := range p.Tasks[s.Task].Frames {
+				delete(frame.Materials, "file:"+str(a, "path"))
+			}
 			return "已从草稿移除，历史保留", nil
 		})
 	case "ask_user":

@@ -124,14 +124,26 @@ type Usage struct {
 	Known  bool `json:"known"`
 }
 type Frame struct {
-	ID       string           `json:"id"`
-	Role     string           `json:"role"`
-	Goal     string           `json:"goal"`
-	Messages []ModelMessage   `json:"messages"`
-	Complete bool             `json:"complete"`
-	Result   string           `json:"result,omitempty"`
-	Context  *ContextSummary  `json:"context_summary,omitempty"`
-	Dialogue *DialogueSummary `json:"dialogue_summary,omitempty"`
+	ID        string                     `json:"id"`
+	Role      string                     `json:"role"`
+	Goal      string                     `json:"goal"`
+	Messages  []ModelMessage             `json:"messages"`
+	Complete  bool                       `json:"complete"`
+	Result    string                     `json:"result,omitempty"`
+	Context   *ContextSummary            `json:"context_summary,omitempty"`
+	Dialogue  *DialogueSummary           `json:"dialogue_summary,omitempty"`
+	Materials map[string]WorkingMaterial `json:"materials,omitempty"`
+}
+
+// WorkingMaterial survives history projection and belongs to a specific frame.
+// Resource/version identify the evidence; missing old fields never imply verification.
+type WorkingMaterial struct {
+	Resource string `json:"resource"`
+	Version  string `json:"version"`
+	Source   string `json:"source"`
+	Content  string `json:"content,omitempty"`
+	Reason   string `json:"reason"`
+	Recovery string `json:"recovery,omitempty"`
 }
 
 // ContextSummary projects a closed prefix of the frame's immutable model history.
