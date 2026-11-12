@@ -69,7 +69,7 @@ func TestRejectRedirectAndRedact(t *testing.T) {
 }
 
 func TestReservationMatchesSerializedRequestBytes(t *testing.T) {
-	const maxOutput = 12288
+	const maxOutput = 81920
 	messages := []core.ModelMessage{
 		{Role: "system", Content: "检查产物"},
 		{Role: "user", Content: "生成网页，包含 <main>、引号 \" 和换行\n。"},
@@ -84,6 +84,12 @@ func TestReservationMatchesSerializedRequestBytes(t *testing.T) {
 		if err != nil || len(body)+maxOutput != request.ReservationTokens() {
 			t.Errorf("reservation = %d, request bytes = %d, read error = %v", request.ReservationTokens(), len(body), err)
 		}
+		var payload struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		if err := json.Unmarshal(body, &payload); err != nil || payload.MaxTokens != maxOutput {
+			t.Errorf("max_tokens = %d, want %d, decode error = %v", payload.MaxTokens, maxOutput, err)
+		}
 		_, _ = io.WriteString(w, `{"choices":[{"message":{"role":"assistant","content":"{\"content\":\"已完成\",\"calls\":[]}"},"finish_reason":"stop"}]}`)
 	}))
 	defer server.Close()
@@ -94,7 +100,7 @@ func TestReservationMatchesSerializedRequestBytes(t *testing.T) {
 }
 
 func TestDialogueOutputBudget(t *testing.T) {
-	for _, tc := range []struct{ configured, want int }{{1024, 1024}, {16384, 8192}} {
+	for _, tc := range []struct{ configured, want int }{{1024, 1024}, {81920, 8192}} {
 		client := New(config.Config{Model: "test", MaxOutputTokens: tc.configured})
 		request, err := client.PrepareDialogue("旧对话")
 		if err != nil {
