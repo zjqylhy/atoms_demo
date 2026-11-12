@@ -26,7 +26,7 @@ type preparedContext struct {
 func prepareFrameContext(client *model.Client, p *core.Project, task *core.Task, frame *core.Frame, tools []model.Tool) (preparedContext, error) {
 	system := core.ModelMessage{Role: "system", Content: instructions(frame.Role, p, task)}
 	if client.Config.ToolMode != "json" {
-		full := append([]core.ModelMessage{system}, frame.Messages...)
+		full := fullFrameContext(p, task, frame)
 		request, err := client.PrepareRequest(full, tools, len(full))
 		if err == nil {
 			err = client.ValidateRequest(request)
@@ -116,17 +116,37 @@ type contextRequirement struct {
 	Text     string `json:"text"`
 }
 
-// The root goal and approved plan come from current state. Answers and revisions
-// are copied from this task's real user messages, including answers in other frames.
+func fullFrameContext(p *core.Project, task *core.Task, frame *core.Frame) []core.ModelMessage {
+	messages := append([]core.ModelMessage{{Role: "system", Content: instructions(frame.Role, p, task)}}, frame.Messages...)
+	if len(task.InstructionMessages) != 0 {
+		messages = append(messages, requirementMessage(taskRequirements(p, task)))
+	}
+	return messages
+}
+
+func requirementMessage(requirements []contextRequirement) core.ModelMessage {
+	return core.ModelMessage{Role: "user", Content: "本任务的用户回答、计划更正和运行中指令（按接收顺序）：\n" + core.JSON(requirements)}
+}
+
+// Answers, plan revisions and live instructions are reconstructed from the actual
+// chat messages. Live instructions are explicitly linked to the task.
 func taskRequirements(p *core.Project, task *core.Task) []contextRequirement {
 	if len(task.RunIDs) == 0 || p.Runs[task.RunIDs[0]] == nil {
 		return nil
 	}
 	started := p.Runs[task.RunIDs[0]].Started
+	instructionIDs := make(map[string]bool, len(task.InstructionMessages))
+	for _, id := range task.InstructionMessages {
+		instructionIDs[id] = true
+	}
 	var out []contextRequirement
 	var question string
 	eventIndex := 0
 	for index, m := range p.Messages {
+		if instructionIDs[m.ID] {
+			out = append(out, contextRequirement{Source: fmt.Sprintf("user:%d", index), Kind: instructionKind, Text: m.Text})
+			continue
+		}
 		if m.At < started || m.Role != "user" || (m.Kind != "answer" && m.Kind != "plan_feedback") {
 			continue
 		}

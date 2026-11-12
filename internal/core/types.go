@@ -83,12 +83,13 @@ type Function struct {
 	Arguments string `json:"arguments"`
 }
 type ModelMessage struct {
-	Role          string            `json:"role"`
-	Content       string            `json:"content"`
-	ToolCalls     []Call            `json:"tool_calls,omitempty"`
-	ToolCallID    string            `json:"tool_call_id,omitempty"`
-	ProtocolItems []json.RawMessage `json:"protocol_items,omitempty"`
-	InvalidAction bool              `json:"invalid_action,omitempty"`
+	Role               string            `json:"role"`
+	Content            string            `json:"content"`
+	ToolCalls          []Call            `json:"tool_calls,omitempty"`
+	ToolCallID         string            `json:"tool_call_id,omitempty"`
+	ProtocolItems      []json.RawMessage `json:"protocol_items,omitempty"`
+	InvalidAction      bool              `json:"invalid_action,omitempty"`
+	InstructionVersion int               `json:"instruction_version,omitempty"`
 }
 type Message struct {
 	ID   string `json:"id"`
@@ -181,18 +182,28 @@ type Run struct {
 	Error         string         `json:"error,omitempty"`
 }
 type Task struct {
-	ID          string            `json:"id"`
-	Goal        string            `json:"goal"`
-	Mode        string            `json:"mode"`
-	Status      string            `json:"status"`
-	Base        Manifest          `json:"base"`
-	Frames      map[string]*Frame `json:"frames"`
-	Root        string            `json:"root"`
-	Steps       map[string]Step   `json:"steps"`
-	Checkpoints []Checkpoint      `json:"checkpoints"`
-	Plan        *Plan             `json:"plan,omitempty"`
-	Question    *Question         `json:"question,omitempty"`
-	RunIDs      []string          `json:"run_ids"`
+	ID                  string            `json:"id"`
+	Goal                string            `json:"goal"`
+	Mode                string            `json:"mode"`
+	Status              string            `json:"status"`
+	Base                Manifest          `json:"base"`
+	Frames              map[string]*Frame `json:"frames"`
+	Root                string            `json:"root"`
+	Steps               map[string]Step   `json:"steps"`
+	Checkpoints         []Checkpoint      `json:"checkpoints"`
+	Plan                *Plan             `json:"plan,omitempty"`
+	Question            *Question         `json:"question,omitempty"`
+	RunIDs              []string          `json:"run_ids"`
+	InstructionMessages []string          `json:"instruction_messages,omitempty"`
+	RunnerAction        *RunnerAction     `json:"runner_action,omitempty"`
+}
+
+// RunnerAction identifies the one runner tool that may still have an external job.
+type RunnerAction struct {
+	FrameID            string `json:"frame_id"`
+	CallID             string `json:"call_id"`
+	JobID              string `json:"job_id"`
+	InstructionVersion int    `json:"instruction_version,omitempty"`
 }
 type Check struct {
 	Name   string `json:"name"`
@@ -253,9 +264,11 @@ func (p *Project) Event(kind, role, text string, data any) {
 	p.Events = append(p.Events, Event{Seq: int64(len(p.Events) + 1), At: Now(), Kind: kind, Role: role, Text: text, Data: data})
 	p.Updated = Now()
 }
-func (p *Project) Message(role, text, kind string) {
-	p.Messages = append(p.Messages, Message{ID: ID(), Role: role, Text: text, At: Now(), Kind: kind})
+func (p *Project) Message(role, text, kind string) string {
+	id := ID()
+	p.Messages = append(p.Messages, Message{ID: id, Role: role, Text: text, At: Now(), Kind: kind})
 	p.Event("message", role, text, nil)
+	return id
 }
 func (p *Project) Fence(run string, epoch int64) error {
 	if p.ActiveRun != run || p.Epoch != epoch || p.Runs[run] == nil || p.Runs[run].Status != "running" {

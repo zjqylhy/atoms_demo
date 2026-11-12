@@ -117,9 +117,9 @@ func (c runnerClient) request(ctx context.Context, method, route string, body []
 	return reply, err
 }
 
-func (c runnerClient) result(ctx context.Context, jobID, digest string, body []byte, onWait func(string) error) (runnerReply, error) {
+func (c runnerClient) result(ctx context.Context, jobID, digest string, body []byte, lookupOnly bool, onWait func(string) error) (runnerReply, error) {
 	backoff := [...]time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second}
-	lookup, maySubmit := true, true
+	lookup, maySubmit := true, !lookupOnly
 	waits := 0
 	for {
 		var reply runnerReply
@@ -141,6 +141,8 @@ func (c runnerClient) result(ctx context.Context, jobID, digest string, body []b
 		reason := "执行结果尚未确认，正在核对原作业"
 		exhausted := "执行结果尚未确认，进度已保留，继续时会核对原作业"
 		switch {
+		case err == nil && lookupOnly && waits == 0 && reply.is(http.StatusNotFound, "job_not_found"):
+			return reply, nil
 		case err == nil && lookup && reply.is(http.StatusNotFound, "job_not_found") && maySubmit:
 			lookup = false
 			continue
@@ -173,6 +175,36 @@ func (c runnerClient) result(ctx context.Context, jobID, digest string, body []b
 }
 
 func (e *Engine) executeRunner(ctx context.Context, s scope, c core.Call, args map[string]any, p *core.Project) (string, error) {
+	action := core.RunnerAction{
+		FrameID: s.Frame, CallID: c.ID, InstructionVersion: s.InstructionVersion,
+		JobID: core.Hash([]byte(s.Task + "/" + s.Frame + "/" + c.ID)),
+	}
+	return e.runRunner(ctx, s, c, args, p, action, false)
+}
+
+func (e *Engine) recoverRunner(ctx context.Context, s scope, p *core.Project, action *core.RunnerAction) error {
+	s.Frame = action.FrameID
+	s.toolStarted = true
+	frame := p.Tasks[s.Task].Frames[s.Frame]
+	if frame == nil {
+		return errors.New("原执行器动作上下文缺失")
+	}
+	calls, _ := pendingCalls(frame.Messages)
+	for _, call := range calls {
+		if call.ID != action.CallID {
+			continue
+		}
+		var args map[string]any
+		if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+			return err
+		}
+		_, err := e.runRunner(ctx, s, call, args, p, *action, true)
+		return err
+	}
+	return errors.New("原执行器动作上下文缺失")
+}
+
+func (e *Engine) runRunner(ctx context.Context, s scope, c core.Call, args map[string]any, p *core.Project, action core.RunnerAction, lookupOnly bool) (string, error) {
 	if e.Config.RunnerURL == "" || e.Config.RunnerToken == "" {
 		return "", errors.New("执行服务尚未配置，请由部署方配置受限执行节点")
 	}
@@ -194,16 +226,30 @@ func (e *Engine) executeRunner(ctx context.Context, s scope, c core.Call, args m
 		}
 	}
 	// The initial failed execution does not use one of the repair attempts.
-	if failures > maxRunRepairs {
+	if !lookupOnly && failures > maxRunRepairs {
 		return "", fmt.Errorf("自动运行修复已达到 %d 次上限，请查看失败记录后调整任务", maxRunRepairs)
 	}
-	files, err := e.Store.Files(s.Owner, p.Files)
-	if err != nil {
-		return "", err
+	jobID, digest := action.JobID, p.Files.Digest()
+	var body []byte
+	if !lookupOnly {
+		files, err := e.Store.Files(s.Owner, p.Files)
+		if err != nil {
+			return "", err
+		}
+		body = []byte(core.JSON(map[string]any{"id": jobID, "digest": digest, "files": files, "action": c.Function.Name, "parameters": args}))
+		// Register the tool before external I/O. A later instruction can let it finish
+		// in this run, or let a resumed run look up the same job without submitting it.
+		_, err = e.Store.Mutate(s.Owner, s.Project, nil, func(p *core.Project) error {
+			if err := s.checkInstruction(p); err != nil {
+				return err
+			}
+			p.Tasks[s.Task].RunnerAction = &action
+			return nil
+		})
+		if err != nil {
+			return "", err
+		}
 	}
-	jobID := core.Hash([]byte(s.Task + "/" + s.Frame + "/" + c.ID))
-	digest := p.Files.Digest()
-	payload := map[string]any{"id": jobID, "digest": digest, "files": files, "action": c.Function.Name, "parameters": args}
 	transport := &http.Transport{Proxy: nil}
 	defer transport.CloseIdleConnections()
 	client := runnerClient{
@@ -214,11 +260,14 @@ func (e *Engine) executeRunner(ctx context.Context, s scope, c core.Call, args m
 		token:   e.Config.RunnerToken,
 	}
 	role := p.Tasks[s.Task].Frames[s.Frame].Role
-	result, err := client.result(ctx, jobID, digest, []byte(core.JSON(payload)), func(message string) error {
+	result, err := client.result(ctx, jobID, digest, body, lookupOnly, func(message string) error {
 		return e.noteWait(s, "runner_wait", role, message)
 	})
 	if err != nil {
 		return "", err
+	}
+	if lookupOnly && result.is(http.StatusNotFound, "job_not_found") {
+		return "", e.skipPendingTools(s, []core.Call{c})
 	}
 	if result.httpStatus != http.StatusOK {
 		rejection := fmt.Errorf("执行服务 HTTP %d：%s", result.httpStatus, e.Config.Redact(result.Error))

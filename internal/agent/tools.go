@@ -191,6 +191,10 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 	if err != nil {
 		return "", err
 	}
+	if err := s.checkInstruction(p); err != nil {
+		return "", err
+	}
+	s.toolStarted = true
 	// Mutating implementation tools remain blocked regardless of role, pathname or model text.
 	needsApproval := map[string]bool{"write_file": true, "replace_text": true, "delete_file": true, "analyze_table": true, "create_chart": true, "run_project": true, "test_preview": true, "finish_task": true}
 	answerOnly := c.Function.Name == "finish_task" && a["answer_only"] == true && p.Files.Digest() == t.Base.Digest()
@@ -208,7 +212,7 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 		}
 		childID := s.Frame + "/" + c.ID
 		_, err = e.Store.Mutate(s.Owner, s.Project, nil, func(p *core.Project) error {
-			if err := p.Fence(s.Run, s.Epoch); err != nil {
+			if err := s.checkInstruction(p); err != nil {
 				return err
 			}
 			task := p.Tasks[s.Task]
@@ -225,10 +229,14 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 		child := s
 		child.Frame = childID
 		result, err := e.runFrame(ctx, child)
-		if err != nil {
+		redirected := errors.Is(err, errNewInstruction)
+		if err != nil && !redirected {
 			return "", err
 		}
 		return e.record(s, c, nil, func(p *core.Project) (any, error) {
+			if redirected {
+				return redirectedDelegation(p, role), nil
+			}
 			return map[string]any{"role": role, "summary": result, "files": p.Files}, nil
 		})
 	case "list_files":

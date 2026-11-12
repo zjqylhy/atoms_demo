@@ -215,6 +215,7 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 		Revision   string `json:"revision"`
 		QuestionID string `json:"question_id"`
 		Version    string `json:"version"`
+		RunID      string `json:"run_id"`
 	}
 	if err := decode(r, &body); err != nil {
 		s.fail(w, 400, err)
@@ -224,6 +225,8 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 	var p *core.Project
 	var err error
 	switch body.Action {
+	case "steer":
+		p, err = s.Engine.Steer(owner(r), id, body.RunID, body.RequestID, body.Text)
 	case "stop", "end":
 		p, err = s.Engine.Stop(owner(r), id, body.Action == "end")
 	case "restore":

@@ -21,7 +21,7 @@ import (
 
 type heldModel struct{ started, release chan struct{} }
 
-func (m heldModel) Generate(ctx context.Context, _ []core.ModelMessage, _ []model.Tool) (core.ModelMessage, core.Usage, error) {
+func (m heldModel) Generate(ctx context.Context, messages []core.ModelMessage, _ []model.Tool) (core.ModelMessage, core.Usage, error) {
 	select {
 	case m.started <- struct{}{}:
 	default:
@@ -30,7 +30,12 @@ func (m heldModel) Generate(ctx context.Context, _ []core.ModelMessage, _ []mode
 	case <-ctx.Done():
 		return core.ModelMessage{}, core.Usage{}, ctx.Err()
 	case <-m.release:
-		return core.ModelMessage{Role: "assistant", ToolCalls: []core.Call{{ID: "done", Type: "function", Function: core.Function{Name: "finish_task", Arguments: `{"summary":"说明完成","answer_only":true}`}}}}, core.Usage{Known: true, Total: 3}, nil
+		summary := "说明完成"
+		if strings.Contains(messages[len(messages)-1].Content, "用简短说明") {
+			summary = "已改用简短说明"
+		}
+		args := core.JSON(map[string]any{"summary": summary, "answer_only": true})
+		return core.ModelMessage{Role: "assistant", ToolCalls: []core.Call{{ID: "done", Type: "function", Function: core.Function{Name: "finish_task", Arguments: args}}}}, core.Usage{Known: true, Total: 3}, nil
 	}
 }
 func TestHTTPWorkspaceCSRFBackgroundExecutionAndVersionIsolation(t *testing.T) {
@@ -104,6 +109,22 @@ func TestHTTPWorkspaceCSRFBackgroundExecutionAndVersionIsolation(t *testing.T) {
 		t.Fatal(string(raw))
 	}
 	<-gate.started
+	var started struct {
+		ActiveRun string `json:"active_run"`
+	}
+	if err := json.Unmarshal(raw, &started); err != nil || started.ActiveRun == "" {
+		t.Fatal("missing active run", err)
+	}
+	steer := core.JSON(map[string]string{"action": "steer", "run_id": started.ActiveRun, "request_id": "steer-once", "text": "用简短说明"})
+	if status, _ := req(bob, "POST", base+"/actions", b, steer); status != 404 {
+		t.Fatal("cross-owner instruction accepted", status)
+	}
+	for range 2 {
+		status, raw := req(alice, "POST", base+"/actions", a, steer)
+		if status != 200 || bytes.Count(raw, []byte(`"kind":"steering"`)) != 1 {
+			t.Fatal("instruction was not saved exactly once", status, string(raw))
+		}
+	}
 	// No SSE connection is open. Completion must not depend on a browser request.
 	close(gate.release)
 	deadline := time.Now().Add(3 * time.Second)
@@ -116,6 +137,13 @@ func TestHTTPWorkspaceCSRFBackgroundExecutionAndVersionIsolation(t *testing.T) {
 	}
 	if !bytes.Contains(raw, []byte(`"status":"completed"`)) {
 		t.Fatal("background run did not complete", string(raw))
+	}
+	if !bytes.Contains(raw, []byte("已改用简短说明")) {
+		t.Fatal("delivery did not reflect the instruction", string(raw))
+	}
+	late := core.JSON(map[string]string{"action": "steer", "run_id": started.ActiveRun, "request_id": "late", "text": "太晚"})
+	if status, _ := req(alice, "POST", base+"/actions", a, late); status != 409 {
+		t.Fatal("ended run accepted an instruction", status)
 	}
 	if bytes.Contains(raw, []byte(`"frames"`)) || bytes.Contains(raw, []byte(`"protocol_items"`)) {
 		t.Fatal("private model context exposed")

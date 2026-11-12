@@ -187,6 +187,10 @@ function ChatHistory({ messages, events, running }: {
         if (message.role === "user") process = undefined;
         if (message.kind === "agent" && process) process.entries.push(message);
         else timeline.push(message);
+        if (message.kind === "steering") {
+          process = { start: event.seq, entries: [] };
+          timeline.push(process);
+        }
         break;
       }
       case "restart":
@@ -217,6 +221,7 @@ function ChatHistory({ messages, events, running }: {
       return <div className="project-event" key={item.seq}><EventRow event={item} /></div>;
     }
     const active = running && item === process;
+    if (!active && !item.entries.length) return null;
     return (
       <details className="agent-process" key={`run-${item.start}`}>
         <summary>
@@ -508,6 +513,7 @@ export default function App() {
   const retry = useRef<{ key: string; id: string } | undefined>(undefined);
   const task = project?.tasks.find((t) => t.id === project.current_task);
   const running = !!project?.active_run;
+  const canSteer = running && task?.status === "running";
   const question = task?.status === "waiting_input" ? task.question : undefined;
   const selected = project?.versions?.find((v) => v.id === version);
   const manifest = selected?.manifest || project?.files || {};
@@ -676,10 +682,12 @@ export default function App() {
       retry.current = undefined;
       if (selection.current === p.id) {
         applySnapshot(result);
-        if (actionName === "submit") setText("");
-        setVersion("");
+        if (actionName === "submit" || actionName === "steer") {
+          setText((draft) => (draft === extra.text ? "" : draft));
+        }
+        if (actionName !== "steer") setVersion("");
       }
-      await list();
+      if (actionName !== "steer") await list();
     } catch (e) {
       if (selection.current === p.id) setError((e as Error).message);
     } finally {
@@ -687,7 +695,14 @@ export default function App() {
     }
   }
   async function submit() {
-    if (!text.trim() || busy || running || unfinished || question || !boot) return;
+    if (!text.trim() || busy || !boot) return;
+    if (running) {
+      if (canSteer && project?.active_run) {
+        await action("steer", { text, run_id: project.active_run });
+      }
+      return;
+    }
+    if (unfinished || question) return;
     let p = project;
     if (!p) {
       setBusy(true);
@@ -748,7 +763,7 @@ export default function App() {
   const composer = (
     <div className="composer">
       <textarea
-        aria-label="描述需求"
+        aria-label={canSteer ? "补充当前任务指令" : "描述需求"}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
@@ -758,13 +773,15 @@ export default function App() {
           }
         }}
         placeholder={
-          task?.status === "waiting_plan"
-            ? "告诉 Mike，计划需要如何调整…"
-            : project
-              ? "继续描述你的想法…"
-              : "描述你想做的产品、文档，或想解决的问题…"
+          canSteer
+            ? "补充或更正当前任务的指令…"
+            : task?.status === "waiting_plan"
+              ? "告诉 Mike，计划需要如何调整…"
+              : project
+                ? "继续描述你的想法…"
+                : "描述你想做的产品、文档，或想解决的问题…"
         }
-        disabled={running}
+        disabled={running && !canSteer}
       />
       <div className="composer-tools">
         <button
@@ -789,17 +806,25 @@ export default function App() {
           </select>
           <ChevronDown size={14} />
         </div>
+        {running && (
+          <button
+            className="icon"
+            title="停止任务"
+            aria-label="停止任务"
+            disabled={busy}
+            onClick={() => action("stop")}
+          >
+            <Square size={13} fill="currentColor" />
+          </button>
+        )}
         <button
           className="send"
-          aria-label={running ? "停止任务" : "发送需求"}
-          disabled={busy || (!running && (!text.trim() || unfinished || !boot))}
-          onClick={() => (running ? action("stop") : submit())}
+          title={running ? "发送指令" : "发送需求"}
+          aria-label={running ? "发送指令" : "发送需求"}
+          disabled={busy || !text.trim() || !boot || (running ? !canSteer : unfinished)}
+          onClick={submit}
         >
-          {running ? (
-            <Square size={16} fill="currentColor" />
-          ) : (
-            <ArrowUp size={20} />
-          )}
+          <ArrowUp size={20} />
         </button>
       </div>
     </div>
