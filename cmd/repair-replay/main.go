@@ -50,9 +50,10 @@ func main() {
 	owner := flag.String("owner", "", "historical owner")
 	directory := flag.String("output", "", "new isolated output directory")
 	steeringPath := flag.String("steering", "", "explicit regression input file")
+	keepRoot := flag.Bool("keep-root", false, "continue the existing coordinator and delegation history")
 	maxCalls := flag.Int("max-calls", 24, "maximum actual model calls")
 	flag.Parse()
-	if *sourcePath == "" || *projectID == "" || *owner == "" || *directory == "" || *steeringPath == "" || *maxCalls < 1 || *maxCalls > 48 {
+	if *sourcePath == "" || *projectID == "" || *owner == "" || *directory == "" || (*steeringPath == "" && !*keepRoot) || *maxCalls < 1 || *maxCalls > 48 {
 		log.Fatal("missing or invalid replay arguments")
 	}
 	if _, err := os.Stat(*directory); !os.IsNotExist(err) {
@@ -82,9 +83,12 @@ func main() {
 	if p.ActiveRun != "" || p.Tasks[p.CurrentTask] == nil || p.Tasks[p.CurrentTask].RunnerAction != nil {
 		log.Fatal("source must be idle with no unconfirmed external job")
 	}
-	input, err := os.ReadFile(*steeringPath)
-	if err != nil {
-		log.Fatal(err)
+	var input []byte
+	if *steeringPath != "" {
+		input, err = os.ReadFile(*steeringPath)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 	db, err := store.Open(filepath.Join(*directory, "atoms.db"))
 	if err != nil {
@@ -119,18 +123,7 @@ func main() {
 		collect(v.Manifest)
 	}
 	_, err = db.Mutate(*owner, created.ID, blobs, func(copy *core.Project) error {
-		*copy = *p
-		copy.ID = created.ID
-		copy.Title = "历史任务验收副本"
-		copy.ActiveRun = ""
-		t := copy.Tasks[copy.CurrentTask]
-		t.Status = "failed"
-		t.Mode = "build"
-		t.Question = nil
-		id := copy.Message("user", string(input), "steering")
-		t.InstructionMessages = append(t.InstructionMessages, id)
-		t.Root = core.ID()
-		t.Frames[t.Root] = &core.Frame{ID: t.Root, Role: "Mike", Goal: t.Goal, Messages: []core.ModelMessage{{Role: "user", Content: t.Goal}}}
+		*copy = replayProject(p, created.ID, string(input), *keepRoot)
 		return nil
 	})
 	if err != nil {
@@ -192,6 +185,22 @@ func main() {
 		}
 		time.Sleep(time.Second)
 	}
+}
+
+func replayProject(source *core.Project, id, input string, keepRoot bool) core.Project {
+	p := core.Clone(*source)
+	p.ID, p.Title, p.ActiveRun = id, "历史任务验收副本", ""
+	t := p.Tasks[p.CurrentTask]
+	if input != "" {
+		messageID := p.Message("user", input, "steering")
+		t.InstructionMessages = append(t.InstructionMessages, messageID)
+	}
+	if !keepRoot {
+		t.Status, t.Mode, t.Question = "failed", "build", nil
+		t.Root = core.ID()
+		t.Frames[t.Root] = &core.Frame{ID: t.Root, Role: "Mike", Goal: t.Goal, Messages: []core.ModelMessage{{Role: "user", Content: t.Goal}}}
+	}
+	return p
 }
 
 func writeFile(name string, data []byte) {

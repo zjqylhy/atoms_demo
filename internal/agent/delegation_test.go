@@ -125,3 +125,61 @@ func TestClosedDispositionCannotReplayEvenWithProviderIDReuse(t *testing.T) {
 		t.Fatal("provider ID reused for different arguments")
 	}
 }
+
+func TestDelegationPassesReadEvidenceInBothDirections(t *testing.T) {
+	rootCalls, alexCalls := 0, 0
+	g := fakeModel(func(_ context.Context, messages []core.ModelMessage, _ []model.Tool) (core.ModelMessage, core.Usage, error) {
+		wire := core.JSON(messages)
+		if strings.Contains(messages[0].Content, "的 Alex。") {
+			alexCalls++
+			if !strings.Contains(wire, "PARENT_READ_EVIDENCE") {
+				t.Error("child lost the parent's actual read")
+			}
+			if alexCalls == 1 {
+				return call("read_file", map[string]any{"path": "second.txt"}), core.Usage{}, nil
+			}
+			return call("return_step", map[string]any{"status": "needs_replan", "reason": "read complete; continue in another subgoal", "summary": "材料已读取", "todo": []string{"review evidence"}}), core.Usage{}, nil
+		}
+		if strings.Contains(messages[0].Content, "的 Bob。") {
+			for _, expected := range []string{"PARENT_READ_EVIDENCE", "CHILD_READ_EVIDENCE"} {
+				if !strings.Contains(wire, expected) {
+					t.Errorf("new delegation rerequired saved evidence %s", expected)
+				}
+			}
+			return call("return_step", map[string]any{"status": "completed", "reason": "evidence reviewed", "summary": "review complete", "todo": []string{}}), core.Usage{}, nil
+		}
+		rootCalls++
+		switch rootCalls {
+		case 1:
+			return call("read_file", map[string]any{"path": "first.txt"}), core.Usage{}, nil
+		case 2:
+			return call("assign_step", map[string]any{"role": "Alex", "goal": "inspect second input"}), core.Usage{}, nil
+		case 3:
+			if !strings.Contains(wire, "CHILD_READ_EVIDENCE") {
+				t.Error("parent received a reference without the child's active material")
+			}
+			return call("assign_step", map[string]any{"role": "Bob", "goal": "review existing evidence"}), core.Usage{}, nil
+		default:
+			return call("finish_task", map[string]any{"summary": "review complete", "answer_only": true}), core.Usage{}, nil
+		}
+	})
+	e, p := testEngine(t, g)
+	blobs := map[string][]byte{}
+	manifest := core.Manifest{}
+	for name, content := range map[string]string{"first.txt": "PARENT_READ_EVIDENCE", "second.txt": "CHILD_READ_EVIDENCE"} {
+		hash := core.Hash([]byte(content))
+		blobs[hash] = []byte(content)
+		manifest[name] = core.File{Hash: hash, Size: len(content)}
+	}
+	if _, err := e.Store.Mutate("alice", p.ID, blobs, func(p *core.Project) error { p.Files = manifest; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	started, err := e.Start("alice", p.ID, "review inputs", "build", "start", "submit", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.ActiveRun == "" })
+	if p.Runs[started.ActiveRun].Status != "completed" || p.Runs[started.ActiveRun].Calls != 7 {
+		t.Fatal("delegation evidence flow failed", core.JSON(p.Runs[started.ActiveRun]))
+	}
+}

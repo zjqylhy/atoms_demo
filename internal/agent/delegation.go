@@ -181,7 +181,8 @@ func (e *Engine) delegate(ctx context.Context, s scope, c core.Call, a map[strin
 			}
 			packet := map[string]any{"goal": str(a, "goal"), "task_goal": t.Goal, "plan": t.Plan, "contract": d,
 				"handoff": "预算内未完成使用 return_step 返回 needs_replan 或 blocked；技术路线是模型建议，不是用户要求"}
-			t.Frames[childID] = &core.Frame{ID: childID, Role: role, Goal: str(a, "goal"), Delegation: d, Messages: []core.ModelMessage{{Role: "user", Content: core.JSON(packet)}}}
+			t.Frames[childID] = &core.Frame{ID: childID, Role: role, Goal: str(a, "goal"), Delegation: d,
+				Materials: core.Clone(t.Frames[s.Frame].Materials), Messages: []core.ModelMessage{{Role: "user", Content: core.JSON(packet)}}}
 			p.Event("handoff", "Mike", "交给 "+role+"："+str(a, "goal"), d)
 		}
 		return nil
@@ -212,6 +213,12 @@ func (e *Engine) delegate(ctx context.Context, s scope, c core.Call, a map[strin
 		}
 	}
 	return e.record(s, c, nil, func(p *core.Project) (any, error) {
+		task := p.Tasks[s.Task]
+		// The next delegation needs the evidence already read by this child,
+		// including incomplete subgoals; passing only filenames forces rereads.
+		for _, material := range task.Frames[childID].Materials {
+			retainMaterial(task.Frames[s.Frame], material)
+		}
 		if redirected {
 			return redirectedDelegation(p, role), nil
 		}
