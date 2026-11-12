@@ -245,7 +245,7 @@ func (e *Engine) load(s scope) (*core.Project, *core.Task, *core.Frame, error) {
 }
 
 func (e *Engine) runFrame(ctx context.Context, s scope) (string, error) {
-	const maxFormatRetries = 2
+	const maxFormatRetries = 5
 	const maxTPMRetries = 2
 	formatRetries := 0
 	tpmRetries := 0

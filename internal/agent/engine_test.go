@@ -64,9 +64,9 @@ func TestActionFormatRetries(t *testing.T) {
 		status, runError      string
 		calls, repairs, tools int
 	}{
-		{name: "reset after valid action", validAfter: 3, finishOn: 6, status: "completed", calls: 6, repairs: 4, tools: 2},
-		{name: "stop after two retries", validAfter: 4, status: "failed", runError: trailingError, calls: 3, repairs: 2},
-		{name: "retries count toward run limit", validAfter: 3, status: "failed", runError: "达到本次模型调用上限", calls: 48, repairs: 32, tools: 16},
+		{name: "reset after valid action", validAfter: 6, finishOn: 12, status: "completed", calls: 12, repairs: 10, tools: 2},
+		{name: "stop after five retries", validAfter: 7, status: "failed", runError: trailingError, calls: 6, repairs: 5},
+		{name: "retries count toward run limit", validAfter: 6, status: "failed", runError: "达到本次模型调用上限", calls: 48, repairs: 40, tools: 8},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			calls := 0
