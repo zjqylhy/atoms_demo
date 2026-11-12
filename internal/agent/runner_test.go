@@ -117,7 +117,7 @@ func TestRunnerRecoversLostResponseAfterBusyRetry(t *testing.T) {
 	defer server.Close()
 	client := runnerClient{http: server.Client(), baseURL: server.URL, token: "test"}
 	var waits []string
-	result, err := client.result(t.Context(), "job-id", "digest", []byte(`{"id":"job-id"}`), func(message string) error {
+	result, err := client.result(t.Context(), "job-id", "digest", []byte(`{"id":"job-id"}`), false, func(message string) error {
 		waits = append(waits, message)
 		return nil
 	})
@@ -149,12 +149,34 @@ func TestUnknownRunnerResultOnlyQueriesUntilLimit(t *testing.T) {
 				return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(`{"code":"job_not_found"}`))}, nil
 			})},
 		}
-		_, err := client.result(t.Context(), "job-id", "digest", nil, func(string) error { return nil })
+		_, err := client.result(t.Context(), "job-id", "digest", nil, false, func(string) error { return nil })
 		want := []time.Duration{0, 0, 2 * time.Second, 7 * time.Second, 17 * time.Second}
 		if err == nil || !strings.Contains(err.Error(), "执行结果尚未确认") || posts != 1 || !slices.Equal(lookups, want) {
 			t.Fatalf("err=%v submissions=%d lookup times=%v", err, posts, lookups)
 		}
 	})
+}
+
+func TestRunnerLookupOnlyDoesNotSubmitAnAbsentJob(t *testing.T) {
+	client := runnerClient{
+		baseURL: "http://127.0.0.1",
+		http: &http.Client{Transport: runnerTestTransport(func(r *http.Request) (*http.Response, error) {
+			if r.Method != http.MethodGet || r.URL.Path != "/jobs/original" {
+				t.Fatalf("unexpected runner request: %s %s", r.Method, r.URL.Path)
+			}
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Body:       io.NopCloser(strings.NewReader(`{"code":"job_not_found"}`)),
+			}, nil
+		})},
+	}
+	result, err := client.result(t.Context(), "original", "digest", nil, true, func(string) error {
+		t.Fatal("unexpected wait for an absent job")
+		return nil
+	})
+	if err != nil || !result.is(http.StatusNotFound, "job_not_found") {
+		t.Fatalf("unexpected result %+v: %v", result, err)
+	}
 }
 
 func TestStopRunnerWaitAndContinueOriginalJob(t *testing.T) {

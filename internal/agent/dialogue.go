@@ -23,9 +23,10 @@ type contextHistory struct {
 func newContextHistory(system core.ModelMessage, messages []core.ModelMessage, requirements []contextRequirement) contextHistory {
 	h := contextHistory{system: system, messages: messages, requirements: requirements, duplicates: map[string]bool{}, latestUser: -1}
 	for _, r := range requirements {
-		if r.Kind == "answer" {
+		switch r.Kind {
+		case "answer":
 			h.duplicates["用户补充："+r.Text] = true
-		} else {
+		case "plan_feedback":
 			h.duplicates["修改计划，仍须等待批准："+r.Text] = true
 		}
 	}
@@ -73,6 +74,12 @@ func (h contextHistory) project(tools *core.ContextSummary, dialogue *core.Dialo
 	messages := []core.ModelMessage{h.system}
 	if tools == nil && dialogue == nil {
 		messages = append(messages, h.messages...)
+		for _, r := range h.requirements {
+			if r.Kind == instructionKind {
+				messages = append(messages, requirementMessage(h.requirements))
+				break
+			}
+		}
 		return messages, len(messages)
 	}
 	var covered map[string]int
@@ -87,7 +94,7 @@ func (h contextHistory) project(tools *core.ContextSummary, dialogue *core.Dialo
 		}
 	}
 	if len(requirements) != 0 {
-		messages = append(messages, core.ModelMessage{Role: "user", Content: "本任务已记录的用户回答和计划更正（按时间排序）：\n" + core.JSON(requirements)})
+		messages = append(messages, requirementMessage(requirements))
 	}
 	cut := 0
 	if tools != nil {
@@ -132,13 +139,16 @@ type dialogueLine struct {
 func (h contextHistory) oldDialogue(tools *core.ContextSummary) []dialogueLine {
 	var lines []dialogueLine
 	latestCorrection := -1
+	latestInstruction := -1
 	for i, r := range h.requirements {
 		if r.Kind == "plan_feedback" {
 			latestCorrection = i
+		} else if r.Kind == instructionKind {
+			latestInstruction = i
 		}
 	}
 	for i, r := range h.requirements {
-		if i != latestCorrection && i < len(h.requirements)-1 && r.Text != "" {
+		if i != latestCorrection && i != latestInstruction && i < len(h.requirements)-1 && r.Text != "" {
 			lines = append(lines, dialogueLine{ID: r.Source, Role: "user", Text: r.Text, Question: r.Question})
 		}
 	}
