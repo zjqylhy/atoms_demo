@@ -93,6 +93,25 @@ func TestReservationMatchesSerializedRequestBytes(t *testing.T) {
 	}
 }
 
+func TestDialogueOutputBudget(t *testing.T) {
+	for _, tc := range []struct{ configured, want int }{{1024, 1024}, {16384, 8192}} {
+		client := New(config.Config{Model: "test", MaxOutputTokens: tc.configured})
+		request, err := client.PrepareDialogue("旧对话")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			MaxTokens int `json:"max_tokens"`
+		}
+		if err := json.Unmarshal(request.body, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.MaxTokens != tc.want || request.ReservationTokens() != request.ByteSize()+tc.want {
+			t.Fatalf("configured=%d, output=%d, reservation=%d", tc.configured, payload.MaxTokens, request.ReservationTokens())
+		}
+	}
+}
+
 func TestModelRequestByteLimit(t *testing.T) {
 	const defaultLimit = 500 * 1024
 	client := New(config.Config{Protocol: "chat_completions", Model: "test", APIKey: "test-key"})
