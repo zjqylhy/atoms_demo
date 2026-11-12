@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const defaultMaxRequestBytes = 500 * 1024
+
 type Config struct {
 	ProviderTPM                                      int
 	ToolMode                                         string
@@ -17,6 +19,7 @@ type Config struct {
 	RunnerURL, RunnerToken                           string
 	MaxCalls, MaxTools, MaxConcurrent, RunSeconds    int
 	DailyCalls, WorkspaceDailyCalls, MaxOutputTokens int
+	MaxRequestBytes                                  int
 }
 
 func env(k, d string) string {
@@ -33,7 +36,36 @@ func number(k string, d int) int {
 	return v
 }
 func Load() Config {
-	return Config{ProviderTPM: number("ATOMS_LLM_TPM", 40000), ToolMode: env("ATOMS_LLM_TOOL_MODE", "native"), Addr: env("ATOMS_ADDR", "127.0.0.1:8090"), DataDir: env("ATOMS_DATA_DIR", "data"), WebDir: env("ATOMS_WEB_DIR", "web/dist"), PublicURL: os.Getenv("ATOMS_PUBLIC_URL"), Protocol: env("ATOMS_LLM_PROTOCOL", "chat_completions"), BaseURL: strings.TrimRight(os.Getenv("ATOMS_LLM_BASE_URL"), "/"), Model: os.Getenv("ATOMS_LLM_MODEL"), APIKey: os.Getenv("ATOMS_LLM_API_KEY"), Revision: env("ATOMS_LLM_CONFIG_REVISION", core.ID()), RunnerURL: strings.TrimRight(os.Getenv("ATOMS_RUNNER_URL"), "/"), RunnerToken: os.Getenv("ATOMS_RUNNER_TOKEN"), MaxCalls: number("ATOMS_MAX_CALLS", 24), MaxTools: number("ATOMS_MAX_TOOLS", 64), MaxConcurrent: number("ATOMS_MAX_CONCURRENT", 2), RunSeconds: number("ATOMS_RUN_SECONDS", 600), DailyCalls: number("ATOMS_DAILY_CALLS", 200), WorkspaceDailyCalls: number("ATOMS_WORKSPACE_DAILY_CALLS", 80), MaxOutputTokens: number("ATOMS_MAX_OUTPUT_TOKENS", 4096)}
+	return Config{
+		ProviderTPM:         number("ATOMS_LLM_TPM", 40000),
+		ToolMode:            env("ATOMS_LLM_TOOL_MODE", "native"),
+		Addr:                env("ATOMS_ADDR", "127.0.0.1:8090"),
+		DataDir:             env("ATOMS_DATA_DIR", "data"),
+		WebDir:              env("ATOMS_WEB_DIR", "web/dist"),
+		PublicURL:           os.Getenv("ATOMS_PUBLIC_URL"),
+		Protocol:            env("ATOMS_LLM_PROTOCOL", "chat_completions"),
+		BaseURL:             strings.TrimRight(os.Getenv("ATOMS_LLM_BASE_URL"), "/"),
+		Model:               os.Getenv("ATOMS_LLM_MODEL"),
+		APIKey:              os.Getenv("ATOMS_LLM_API_KEY"),
+		Revision:            env("ATOMS_LLM_CONFIG_REVISION", core.ID()),
+		RunnerURL:           strings.TrimRight(os.Getenv("ATOMS_RUNNER_URL"), "/"),
+		RunnerToken:         os.Getenv("ATOMS_RUNNER_TOKEN"),
+		MaxCalls:            number("ATOMS_MAX_CALLS", 24),
+		MaxTools:            number("ATOMS_MAX_TOOLS", 64),
+		MaxConcurrent:       number("ATOMS_MAX_CONCURRENT", 2),
+		RunSeconds:          number("ATOMS_RUN_SECONDS", 600),
+		DailyCalls:          number("ATOMS_DAILY_CALLS", 2000),
+		WorkspaceDailyCalls: number("ATOMS_WORKSPACE_DAILY_CALLS", 1000),
+		MaxOutputTokens:     number("ATOMS_MAX_OUTPUT_TOKENS", 4096),
+		MaxRequestBytes:     number("ATOMS_MAX_REQUEST_BYTES", defaultMaxRequestBytes),
+	}
+}
+
+func (c Config) RequestByteLimit() int {
+	if c.MaxRequestBytes > 0 {
+		return c.MaxRequestBytes
+	}
+	return defaultMaxRequestBytes
 }
 func (c Config) ModelError() error {
 	if c.APIKey == "" || c.Model == "" || c.BaseURL == "" {

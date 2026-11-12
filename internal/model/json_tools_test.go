@@ -19,7 +19,8 @@ func TestJSONToolAdaptation(t *testing.T) {
 		}
 	}
 	c := New(config.Config{Model: "chat", ToolMode: "json"})
-	payload := core.JSON(c.jsonPayload([]core.ModelMessage{{Role: "system", Content: "system"}, m, {Role: "tool", ToolCallID: m.ToolCalls[0].ID, Content: `{"ok":true}`}}, tools))
+	messages := []core.ModelMessage{{Role: "system", Content: "system"}, m, {Role: "tool", ToolCallID: m.ToolCalls[0].ID, Content: `{"ok":true}`}}
+	payload := core.JSON(c.jsonPayload(messages, tools, len(messages)))
 	if strings.Contains(payload, `"role":"tool"`) || strings.Contains(payload, `"tool_calls":`) || !strings.Contains(payload, `"type":"json_object"`) {
 		t.Fatal(payload)
 	}
@@ -33,6 +34,20 @@ func TestJSONToolAdaptation(t *testing.T) {
 	}
 }
 
+func TestJSONActionRejectsTrailingContent(t *testing.T) {
+	tools := []Tool{{Name: "read_file"}}
+	action := `{"content":"","calls":[{"name":"read_file","arguments":{"path":"notes.md"}}]}`
+	if m, err := parseJSONAction(action+" \t\r\n", tools); err != nil || len(m.ToolCalls) != 1 {
+		t.Fatalf("trailing whitespace should be allowed: %v", err)
+	}
+	for _, suffix := range []string{"\n解释", "\n" + action} {
+		m, err := parseJSONAction(action+suffix, tools)
+		if err == nil || !strings.Contains(err.Error(), "顶层对象闭合后只允许空白") || len(m.ToolCalls) != 0 {
+			t.Fatalf("unexpected outcome for trailing content: %v, %d calls", err, len(m.ToolCalls))
+		}
+	}
+}
+
 func TestJSONHistoryKeepsEvidenceWithoutRepeatingFileBodies(t *testing.T) {
 	c := New(config.Config{Model: "chat", ToolMode: "json"})
 	body := strings.Repeat("large-file-body", 1000)
@@ -42,11 +57,11 @@ func TestJSONHistoryKeepsEvidenceWithoutRepeatingFileBodies(t *testing.T) {
 		{Role: "assistant", ToolCalls: []core.Call{{ID: "saved", Type: "function", Function: core.Function{Name: "write_file", Arguments: core.JSON(map[string]any{"path": "app.js", "content": body})}}}},
 		{Role: "tool", ToolCallID: "saved", Content: `{"ok":true}`},
 	}
-	wire := core.JSON(c.jsonPayload(messages, nil))
+	wire := core.JSON(c.jsonPayload(messages, nil, len(messages)))
 	if strings.Contains(wire, body) || !strings.Contains(wire, core.Hash([]byte(body))) || !strings.Contains(wire, "saved") {
 		t.Fatal("history evidence/size regression")
 	}
-	projected := c.jsonPayload(messages, nil).(map[string]any)["messages"].([]map[string]string)
+	projected := c.jsonPayload(messages, nil, len(messages)).(map[string]any)["messages"].([]map[string]string)
 	if projected[2]["role"] != "user" || strings.Contains(projected[2]["content"], `"arguments"`) || strings.Contains(wire, "historical_content_note") {
 		t.Fatal("compression metadata presented as executable tool arguments")
 	}
@@ -65,7 +80,7 @@ func TestOldReadBodyIsCompactedButLatestReadRemainsExact(t *testing.T) {
 		{Role: "assistant", Content: "读取当前内容"},
 		{Role: "tool", ToolCallID: "new", Content: core.JSON(map[string]any{"ok": true, "result": map[string]any{"path": "a.js", "content": latest}})},
 	}
-	wire := core.JSON(c.jsonPayload(messages, nil))
+	wire := core.JSON(c.jsonPayload(messages, nil, len(messages)))
 	if strings.Contains(wire, oldBody) || !strings.Contains(wire, latest) || !strings.Contains(wire, core.Hash([]byte(oldBody))) {
 		t.Fatal("historical reads grew or latest body lost")
 	}
@@ -74,7 +89,7 @@ func TestOldReadBodyIsCompactedButLatestReadRemainsExact(t *testing.T) {
 	}
 	shortBody := "已确认的简短需求，不应在格式修正时被省略"
 	messages[1].Content = core.JSON(map[string]any{"result": map[string]any{"content": shortBody}})
-	if wire := core.JSON(c.jsonPayload(messages, nil)); !strings.Contains(wire, shortBody) {
+	if wire := core.JSON(c.jsonPayload(messages, nil, len(messages))); !strings.Contains(wire, shortBody) {
 		t.Fatal("short requirements lost in history")
 	}
 }

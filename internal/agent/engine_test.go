@@ -54,6 +54,144 @@ func waitProject(t *testing.T, e *Engine, id string, predicate func(*core.Projec
 	t.Fatalf("timed out: %s", core.JSON(p.Public()))
 	return nil
 }
+
+func TestActionFormatRetries(t *testing.T) {
+	const trailingError = "模型动作 JSON 包含多余内容，未执行：顶层对象闭合后只允许空白"
+	for _, tt := range []struct {
+		name                  string
+		validAfter            int
+		finishOn              int
+		status, runError      string
+		calls, repairs, tools int
+	}{
+		{name: "reset after valid action", validAfter: 3, finishOn: 6, status: "completed", calls: 6, repairs: 4, tools: 2},
+		{name: "stop after two retries", validAfter: 4, status: "failed", runError: trailingError, calls: 3, repairs: 2},
+		{name: "retries count toward run limit", validAfter: 3, status: "failed", runError: "达到本次模型调用上限", calls: 48, repairs: 32, tools: 16},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			g := fakeModel(func(_ context.Context, messages []core.ModelMessage, _ []model.Tool) (core.ModelMessage, core.Usage, error) {
+				calls++
+				usage := core.Usage{Known: true, Input: 1, Output: 1, Total: 2}
+				if (calls-1)%tt.validAfter != 0 {
+					last := messages[len(messages)-1].Content
+					if !strings.Contains(last, trailingError) || !strings.Contains(last, "只输出一个完整 JSON 对象") {
+						return core.ModelMessage{}, usage, errors.New("retry prompt omitted error or output instructions")
+					}
+				}
+				switch {
+				case calls == tt.finishOn:
+					return call("finish_task", map[string]any{"summary": "已检查", "answer_only": true}), usage, nil
+				case calls%tt.validAfter == 0:
+					return call("list_files", map[string]any{}), usage, nil
+				default:
+					return core.ModelMessage{Role: "assistant", Content: `{"content":"","calls":[]} extra`, InvalidAction: true},
+						usage, &model.ActionFormatError{Reason: trailingError}
+				}
+			})
+			e, p := testEngine(t, g)
+			e.Config.MaxCalls = 48
+			started, err := e.Start("alice", p.ID, "测试格式重试", "build", "start", "submit", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			runID := started.ActiveRun
+			p = waitProject(t, e, p.ID, func(p *core.Project) bool {
+				return p.Runs[runID].Status != "running"
+			})
+			r := p.Runs[runID]
+			if r.Status != tt.status || (tt.runError != "" && !strings.Contains(r.Error, tt.runError)) ||
+				r.Calls != tt.calls || r.FormatRepairs != tt.repairs || r.Tools != tt.tools || r.UsageReports != tt.calls {
+				t.Fatalf("unexpected run: %+v", r)
+			}
+		})
+	}
+}
+
+func TestGatewayTPMRetries(t *testing.T) {
+	for _, tt := range []struct {
+		name                    string
+		finishOn, runCap, daily int
+		calls, waits            int
+		errorText               string
+	}{
+		{name: "retry and complete", finishOn: 3, runCap: 96, calls: 3, waits: 2},
+		{name: "stop after two retries", runCap: 96, calls: 3, waits: 2, errorText: "model_tpm"},
+		{name: "respect run quota", runCap: 1, calls: 1, errorText: "model_tpm"},
+		{name: "respect daily quota", runCap: 96, daily: 2, calls: 2, waits: 2, errorText: "服务当日模型调用额度已用完"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			g := fakeModel(func(_ context.Context, _ []core.ModelMessage, _ []model.Tool) (core.ModelMessage, core.Usage, error) {
+				calls++
+				if calls == tt.finishOn {
+					return call("finish_task", map[string]any{"summary": "已恢复", "answer_only": true}), core.Usage{Known: true}, nil
+				}
+				return core.ModelMessage{}, core.Usage{}, &model.TPMThrottleError{RetryAfter: time.Millisecond}
+			})
+			e, p := testEngine(t, g)
+			e.Config.MaxCalls = tt.runCap
+			e.Config.DailyCalls = tt.daily
+			started, err := e.Start("alice", p.ID, "测试网关限流恢复", "build", "start", "submit", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			runID := started.ActiveRun
+			p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.Runs[runID].Status != "running" })
+			r := p.Runs[runID]
+			waits := 0
+			for _, event := range p.Events {
+				if event.Kind == "model_wait" {
+					waits++
+				}
+			}
+			if r.Calls != tt.calls || waits != tt.waits || r.FormatRepairs != 0 {
+				t.Fatalf("unexpected run: %+v, waits=%d", r, waits)
+			}
+			if tt.errorText == "" {
+				if r.Status != "completed" || r.Tools != 1 || r.Usage.Known {
+					t.Fatalf("unexpected completion: %+v", r)
+				}
+			} else if r.Status != "failed" || r.Tools != 0 || !strings.Contains(r.Error, tt.errorText) {
+				t.Fatalf("unexpected failure: %+v", r)
+			}
+		})
+	}
+}
+
+func TestStopCancelsGatewayTPMWait(t *testing.T) {
+	g := fakeModel(func(_ context.Context, _ []core.ModelMessage, _ []model.Tool) (core.ModelMessage, core.Usage, error) {
+		return core.ModelMessage{}, core.Usage{}, &model.TPMThrottleError{RetryAfter: time.Minute}
+	})
+	e, p := testEngine(t, g)
+	started, err := e.Start("alice", p.ID, "测试取消等待", "build", "start", "submit", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID := started.ActiveRun
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		p, err = e.Store.Get("alice", p.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Events[len(p.Events)-1].Kind == "model_wait" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("model wait did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := e.Stop("alice", p.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.ActiveRun == "" })
+	if r := p.Runs[runID]; r.Status != "stopped" || r.Calls != 1 {
+		t.Fatalf("unexpected stopped run: %+v", r)
+	}
+}
+
 func TestAnswerIsBoundToTheDisplayedQuestion(t *testing.T) {
 	g := fakeModel(func(_ context.Context, messages []core.ModelMessage, _ []model.Tool) (core.ModelMessage, core.Usage, error) {
 		switch messages[len(messages)-1].Content {

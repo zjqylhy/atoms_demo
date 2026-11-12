@@ -10,6 +10,7 @@ import (
 	"mockatoms/internal/config"
 	"mockatoms/internal/core"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,17 +28,35 @@ type Client struct {
 	HTTP   *http.Client
 }
 
+// TPMThrottleError identifies a gateway response for the model's minute token quota.
+type TPMThrottleError struct {
+	RetryAfter time.Duration
+}
+
+func (e *TPMThrottleError) Error() string {
+	return "模型网关每分钟 Token 额度不足（HTTP 429，model_tpm）"
+}
+
 func New(c config.Config) *Client {
 	return &Client{Config: c, HTTP: &http.Client{Timeout: 120 * time.Second, Transport: &http.Transport{Proxy: nil, MaxIdleConns: 8, IdleConnTimeout: 60 * time.Second}, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("模型服务重定向被拒绝") }}}
 }
-func (c *Client) Generate(ctx context.Context, messages []core.ModelMessage, tools []Tool) (core.ModelMessage, core.Usage, error) {
-	if e := c.Config.ModelError(); e != nil {
-		return core.ModelMessage{}, core.Usage{}, e
-	}
+
+// PreparedRequest keeps admission and transport on the same serialized payload.
+type PreparedRequest struct {
+	route     string
+	body      []byte
+	maxOutput int
+}
+
+func (r PreparedRequest) ByteSize() int          { return len(r.body) }
+func (r PreparedRequest) ReservationTokens() int { return r.ByteSize() + r.maxOutput }
+
+// PrepareRequest measures a candidate before the engine decides whether to compact it.
+func (c *Client) PrepareRequest(messages []core.ModelMessage, tools []Tool, completeFrom int) (PreparedRequest, error) {
 	var payload any
 	route := "/chat/completions"
 	if c.Config.ToolMode == "json" {
-		payload = c.jsonPayload(messages, tools)
+		payload = c.jsonPayload(messages, tools, completeFrom)
 	} else if c.Config.Protocol == "responses" {
 		route = "/responses"
 		input := []any{}
@@ -84,12 +103,34 @@ func (c *Client) Generate(ctx context.Context, messages []core.ModelMessage, too
 	}
 	b, e := json.Marshal(payload)
 	if e != nil {
+		return PreparedRequest{}, e
+	}
+	return PreparedRequest{route: route, body: b, maxOutput: c.outputLimit()}, nil
+}
+
+func (c *Client) ValidateRequest(request PreparedRequest) error {
+	if limit := c.Config.RequestByteLimit(); request.ByteSize() > limit {
+		return fmt.Errorf("当前模型上下文过大：请求 %d 字节，超过 %d 字节上限，请缩小任务范围", request.ByteSize(), limit)
+	}
+	return nil
+}
+
+func (c *Client) Generate(ctx context.Context, messages []core.ModelMessage, tools []Tool) (core.ModelMessage, core.Usage, error) {
+	request, err := c.PrepareRequest(messages, tools, len(messages))
+	if err != nil {
+		return core.ModelMessage{}, core.Usage{}, err
+	}
+	return c.GeneratePrepared(ctx, request, tools)
+}
+
+func (c *Client) GeneratePrepared(ctx context.Context, request PreparedRequest, tools []Tool) (core.ModelMessage, core.Usage, error) {
+	if e := c.Config.ModelError(); e != nil {
 		return core.ModelMessage{}, core.Usage{}, e
 	}
-	if len(b) > 128*1024 {
-		return core.ModelMessage{}, core.Usage{}, errors.New("当前模型上下文过大，请缩小任务范围")
+	if e := c.ValidateRequest(request); e != nil {
+		return core.ModelMessage{}, core.Usage{}, e
 	}
-	req, e := http.NewRequestWithContext(ctx, "POST", c.Config.BaseURL+route, bytes.NewReader(b))
+	req, e := http.NewRequestWithContext(ctx, "POST", c.Config.BaseURL+request.route, bytes.NewReader(request.body))
 	if e != nil {
 		return core.ModelMessage{}, core.Usage{}, e
 	}
@@ -115,10 +156,15 @@ func (c *Client) Generate(ctx context.Context, messages []core.ModelMessage, too
 		var er struct {
 			Error struct {
 				Message string `json:"message"`
-				Type    string `json:"type"`
+				Code    string `json:"code"`
+				Reason  string `json:"reason"`
 			} `json:"error"`
 		}
-		_ = json.Unmarshal(body, &er)
+		parseErr := json.Unmarshal(body, &er)
+		if parseErr == nil && resp.StatusCode == http.StatusTooManyRequests &&
+			er.Error.Code == "insufficient_quota" && er.Error.Reason == "model_tpm" {
+			return core.ModelMessage{}, core.Usage{}, &TPMThrottleError{RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"))}
+		}
 		detail := er.Error.Message
 		if len(detail) > 600 {
 			detail = detail[:600]
@@ -208,6 +254,16 @@ func (c *Client) Generate(ctx context.Context, messages []core.ModelMessage, too
 		seen[call.ID] = true
 	}
 	return m, usage, nil
+}
+
+func parseRetryAfter(value string) time.Duration {
+	if seconds, err := strconv.ParseUint(value, 10, 32); err == nil {
+		return time.Duration(seconds) * time.Second
+	}
+	if at, err := http.ParseTime(value); err == nil {
+		return max(0, time.Until(at))
+	}
+	return 0
 }
 
 func (c *Client) outputLimit() int {

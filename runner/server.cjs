@@ -119,7 +119,9 @@ async function run(job, name) {
       "--tmpfs",
       "/workspace:rw,nosuid,nodev,size=96m,mode=0755",
       "--tmpfs",
-      "/tmp:rw,nosuid,nodev,size=128m,mode=1777",
+      job.action === "run_project" && job.parameters.kind === "go"
+        ? "/tmp:rw,exec,nosuid,nodev,size=384m,mode=1777"
+        : "/tmp:rw,nosuid,nodev,size=128m,mode=1777",
       "--shm-size",
       "64m",
       "--init",

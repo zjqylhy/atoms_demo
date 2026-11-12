@@ -1,0 +1,20 @@
+{
+  "release": "20261111T143116Z",
+  "archive_sha256": "cfc333c4ac1bec69d778b021e0d88f48d98049507a414fba22b1b29fe0fdade3",
+  "binary_sha256": "a3eb1cb5229709dd9210b8cca891c19bd77362f90ba61ceeb223ef9daf7ee92d",
+  "domain": "https://atoms.linhengyi.xyz/",
+  "runtime": "runsc",
+  "runner_image": "sha256:f0b29ac9a0b040ca411c4c5ad0876f4bcc65299e571b95e97433a59952693ef6",
+  "git_commit": null,
+  "reason": "User requested no Git commit",
+  "frontend_files": {
+    "web/dist/assets/index-DBdKvzt7.js": "551e2fd7e36301bb226784f6ef0c21af755dedb580b48b1a4880fb7b9a60bbdf",
+    "web/dist/assets/index-hXQVnNTA.css": "a035b6f4de541d345b92174cd127bd3cdeae4695a608692efbe8f2625d1ccc41",
+    "web/dist/index.html": "ec52c9f213ddbd705b3f470e83df0f99a5ce7c8a21f3fad61d2a0db03ec34e0a"
+  },
+  "final_acceptance_at": "2026-11-11T14:41:27.674845+00:00",
+  "backup": "/opt/atoms_lab/backups/20261111T144126Z.db",
+  "existing_services_unchanged": true,
+  "workspace_daily_calls": 80,
+  "global_daily_calls": 200
+}

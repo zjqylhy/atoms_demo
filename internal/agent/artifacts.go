@@ -38,12 +38,12 @@ func checkArtifacts(files map[string]string, manifest core.Manifest) core.Report
 			continue
 		}
 		switch path.Ext(name) {
-		case ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".css":
+		case ".js", ".mjs", ".cjs", ".jsx", ".ts", ".mts", ".cts", ".tsx", ".css":
 			loader := api.LoaderJS
 			switch path.Ext(name) {
 			case ".jsx":
 				loader = api.LoaderJSX
-			case ".ts":
+			case ".ts", ".mts", ".cts":
 				loader = api.LoaderTS
 			case ".tsx":
 				loader = api.LoaderTSX
@@ -120,14 +120,34 @@ func completionCheck(p *core.Project) error {
 	digest := p.Files.Digest()
 	passed := map[string]bool{}
 	for _, r := range p.Reports {
-		if r.Digest == digest {
-			passed[r.Kind] = r.Status == "passed"
+		if r.Digest != digest {
+			continue
+		}
+		kind := r.Kind
+		ok := r.Status == "passed"
+		if execution := reportExecution(r); execution != "" {
+			kind = execution
+		}
+		if kind == "go" {
+			build, test := false, false
+			for _, check := range r.Checks {
+				build = build || (check.Name == "go_build" && check.Status == "passed")
+				test = test || (check.Name == "go_test" && check.Status == "passed")
+			}
+			ok = ok && build && test
+		}
+		passed[kind] = ok
+	}
+	// Historical reports used a single run kind for both JS scripts and web builds.
+	for _, kind := range []string{"web", "javascript"} {
+		if _, recorded := passed[kind]; !recorded {
+			passed[kind] = passed["run"]
 		}
 	}
 	if !passed["static"] {
 		return errors.New("当前文件必须先通过 check_artifacts")
 	}
-	web, script := false, false
+	web, script, typescript, python, golang := false, false, false, false, false
 	for name, f := range p.Files {
 		if f.ReadOnly {
 			continue
@@ -135,17 +155,29 @@ func completionCheck(p *core.Project) error {
 		switch path.Ext(name) {
 		case ".html":
 			web = true
-		case ".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx":
+		case ".js", ".mjs", ".cjs", ".jsx":
 			script = true
-		case ".go", ".py":
-			return errors.New("该语言尚未配置运行验证，产物保留为未验证草稿")
+		case ".ts", ".mts", ".cts", ".tsx":
+			typescript = true
+		case ".py":
+			python = true
+		case ".go":
+			golang = true
 		}
 	}
+	if golang && !passed["go"] {
+		return errors.New("Go 项目必须通过当前文件版本的 go build 与 go test")
+	}
+	if python && !passed["python"] {
+		return errors.New("Python 脚本必须通过当前文件版本的实际执行与输出断言")
+	}
 	if web {
-		if !passed["run"] || !passed["browser"] {
+		if !passed["web"] || !passed["browser"] {
 			return errors.New("网页必须通过当前文件版本的真实运行与浏览器验收")
 		}
-	} else if script && !passed["run"] {
+	} else if typescript && !passed["typescript"] {
+		return errors.New("TypeScript 脚本必须通过当前文件版本的转译、执行与输出断言")
+	} else if script && !golang && !python && !typescript && !passed["javascript"] {
 		return errors.New("脚本必须经过真实运行和输出断言")
 	}
 	return nil

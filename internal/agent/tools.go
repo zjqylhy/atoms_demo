@@ -52,7 +52,7 @@ func definitions(role string) []model.Tool {
 			def("write_file", "保存代码或项目文件，拒绝覆盖意外变化", writes, "path", "content", "old_hash"),
 			def("replace_text", "按旧摘要精确替换，匹配次数必须等于 expected_count", map[string]any{"path": prop("string", "文件路径"), "old_hash": prop("string", "文件当前摘要"), "old_text": prop("string", "待替换文字"), "new_text": prop("string", "新文字"), "expected_count": prop("integer", "预期匹配次数")}, "path", "old_hash", "old_text", "new_text", "expected_count"),
 			def("delete_file", "只从当前草稿中移除文件，保留历史", map[string]any{"path": prop("string", "路径"), "old_hash": prop("string", "文件当前摘要")}, "path", "old_hash"),
-			def("run_project", "在隔离 Node 环境实际构建网页或执行 JS 脚本，返回真实报告。脚本工作目录是独立临时目录；读取项目文件请基于脚本所在位置解析路径（ESM 使用 new URL(相对路径, import.meta.url)）", map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"web", "script"}}, "entry": prop("string", "网页 index.html 或脚本路径"), "args": listProp("string"), "expected_stdout": prop("string", "脚本预期标准输出，按 trim 后精确比较")}, "kind", "entry"),
+			def("run_project", "在隔离环境真实构建网页、运行 JavaScript/TypeScript/Python 脚本或编译并测试 Go 模块。kind=go 时使用 go.mod；kind=script 必填 expected_stdout，工作目录为临时目录，项目文件按脚本位置解析", map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"web", "script", "go"}}, "entry": prop("string", "网页 index.html、脚本相对路径或根目录 go.mod"), "args": listProp("string"), "expected_stdout": prop("string", "kind=script 必填，去除首尾空白后精确比较；其他类型省略")}, "kind", "entry"),
 			def("test_preview", "隔离浏览器执行需求对应的交互断言；至少一个断言，禁止自定义 JS", map[string]any{"steps": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string", "enum": []string{"click", "fill", "select", "check", "expect_text", "expect_count", "expect_visible"}}, "selector": prop("string", "CSS 选择器"), "value": prop("string", "输入或期望文本"), "count": prop("integer", "期望数量"), "requirement": prop("string", "对应用户需求或计划验收项")}, "required": []string{"action", "selector", "requirement"}, "additionalProperties": false}}}, "steps"))
 	case "David":
 		all = append(all, def("write_document", "保存分析报告 Markdown", writes, "path", "content", "old_hash"),
@@ -153,7 +153,7 @@ func kind(name string) string {
 		return "data"
 	case ".html":
 		return "web"
-	case ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".css", ".py", ".go":
+	case ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".tsx", ".jsx", ".css", ".py", ".go":
 		return "code"
 	case ".json":
 		if strings.HasSuffix(name, ".chart.json") {

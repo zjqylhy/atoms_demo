@@ -8,7 +8,7 @@ import subprocess
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--ssh-key', required=True)
-parser.add_argument('--host', required=True)
+parser.add_argument('--host', default='47.113.231.252')
 parser.add_argument('--release', required=True)
 args = parser.parse_args()
 if not re.fullmatch(r'[0-9]{8}T[0-9]{6}Z', args.release):

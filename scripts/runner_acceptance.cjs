@@ -75,6 +75,15 @@ async function run(name, j, want) {
       } catch {}
       await new Promise((r) => setTimeout(r, 500));
     }
+    if (process.env.ATOMS_ACCEPTANCE_GO_FIXTURE) {
+      const files = JSON.parse(await fs.readFile(process.env.ATOMS_ACCEPTANCE_GO_FIXTURE, "utf8"));
+      await run("generated-go-build-and-test", job(files, "run_project", { kind: "go", entry: "go.mod" }), "passed");
+      await fs.mkdir("artifacts", { recursive: true });
+      await fs.writeFile("artifacts/runner-go-fixture.json", JSON.stringify({
+        at: new Date().toISOString(), runtime, source_digest: digest(files), results,
+      }, null, 2));
+      return;
+    }
     if (process.env.ATOMS_ACCEPTANCE_FIXTURE) {
       const fixture = JSON.parse(await fs.readFile(process.env.ATOMS_ACCEPTANCE_FIXTURE, "utf8"));
       await run("generated-page-build", job(fixture.files, "run_project", {kind:"web",entry:"index.html"}), "passed");
@@ -107,6 +116,33 @@ async function run(name, j, want) {
       }),
       "failed",
     );
+    await run(
+      "python-output",
+      job({
+        "tools/sum.py": "from pathlib import Path\nfrom helper import add\nn = int((Path(__file__).parent / 'n.txt').read_text())\nprint(add(n, 3))",
+        "tools/helper.py": "def add(a, b):\n    return a + b",
+        "tools/n.txt": "7",
+      }, "run_project", { kind: "script", entry: "tools/sum.py", expected_stdout: "10" }),
+      "passed",
+    );
+    await run(
+      "typescript-output",
+      job({
+        "tools/main.ts": "import { add } from './helper'; console.log(add(7, 3));",
+        "tools/helper.ts": "export function add(a: number, b: number): number { return a + b; }",
+      }, "run_project", { kind: "script", entry: "tools/main.ts", expected_stdout: "10" }),
+      "passed",
+    );
+    const go = await run(
+      "go-build-and-test",
+      job({
+        "go.mod": "module example.test/sample\n\ngo 1.21\n",
+        "main.go": "package main\n\nfunc sum(a, b int) int { return a+b }\nfunc main() {}\n",
+        "main_test.go": 'package main\nimport "testing"\nfunc TestSum(t *testing.T) { if sum(7, 3) != 10 { t.Fatal("sum") } }\n',
+      }, "run_project", { kind: "go", entry: "go.mod" }),
+      "passed",
+    );
+    assert.deepEqual(go.body.checks.map(({ name }) => name), ["go_build", "go_test"]);
     const page = {
       "index.html":
         '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><h1>Counter</h1><form id="counter-form"><button id="plus">Add</button></form><output id="count">0</output><script src="app.js"></script></body></html>',

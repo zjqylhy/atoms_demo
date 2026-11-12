@@ -3,13 +3,17 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import sys
 import tarfile
 
 root = Path('/opt/atoms_lab')
-receipt = json.loads((root/'staging/release.json').read_text())
+staging_root = root/'staging'
+staging = Path(sys.argv[1]).resolve() if len(sys.argv) == 2 else staging_root
+assert staging == staging_root or staging_root in staging.parents
+receipt = json.loads((staging/'release.json').read_text())
 assert re.fullmatch(r'[0-9]{8}T[0-9]{6}Z', receipt['release'])
 assert receipt['archive'] == 'atoms-' + receipt['release'] + '.tar.gz'
-archive = root/'staging'/receipt['archive']
+archive = staging/receipt['archive']
 assert hashlib.sha256(archive.read_bytes()).hexdigest() == receipt['archive_sha256']
 target = root/'releases'/receipt['release']
 target.mkdir(parents=True, exist_ok=True)

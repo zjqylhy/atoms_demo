@@ -84,3 +84,45 @@ func TestStaticChecksDoNotClaimRuntimeSuccess(t *testing.T) {
 		}
 	}
 }
+
+func TestCompletionRequiresCurrentLanguageReport(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		file   string
+		checks []core.Check
+	}{
+		{"go", "main.go", []core.Check{{Name: "go_build", Status: "passed"}, {Name: "go_test", Status: "passed"}}},
+		{"python", "main.py", nil},
+		{"typescript", "main.ts", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := core.NewProject("a", "test")
+			p.Files[tc.file] = core.File{Hash: "source"}
+			p.Files["tools/check.mjs"] = core.File{Hash: "helper"}
+			digest := p.Files.Digest()
+			p.Reports = []core.Report{
+				{Kind: "static", Status: "passed", Digest: digest},
+				{Kind: "run", Status: "passed", Digest: digest},
+			}
+			report := core.Report{Kind: "run", Status: "passed", Digest: "previous",
+				Details: []byte(core.JSON(map[string]string{"execution": tc.name})), Checks: tc.checks}
+			p.Reports = append(p.Reports, report)
+			if completionCheck(p) == nil {
+				t.Fatal("historical JavaScript or stale language report accepted")
+			}
+			report.Digest = digest
+			if tc.name == "go" {
+				incomplete := report
+				incomplete.Checks = report.Checks[:1]
+				p.Reports = append(p.Reports, incomplete)
+				if completionCheck(p) == nil {
+					t.Fatal("Go build alone accepted")
+				}
+			}
+			p.Reports = append(p.Reports, report)
+			if err := completionCheck(p); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

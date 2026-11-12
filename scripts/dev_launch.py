@@ -12,7 +12,7 @@ root = Path(__file__).resolve().parents[1]
 env = os.environ.copy()
 secret = env.get('ATOMS_LLM_API_KEY') or getpass.getpass('Gateway API key (hidden): ')
 # Check credentials before starting workers; never print response bodies or the key.
-request = urllib.request.Request('https://gateway.example.com/v1/models',
+request = urllib.request.Request('https://api.linhengyi.xyz/v1/models',
                                  headers={'Authorization': 'Bearer ' + secret})
 try:
     with urllib.request.urlopen(request, timeout=20) as response:
@@ -22,7 +22,7 @@ try:
 except Exception:
     raise SystemExit('Gateway credential validation failed; no workers started.')
 print('Gateway credential verified; chat model is available.', flush=True)
-env.update(ATOMS_LLM_API_KEY=secret, ATOMS_LLM_BASE_URL='https://gateway.example.com/v1',
+env.update(ATOMS_LLM_API_KEY=secret, ATOMS_LLM_BASE_URL='https://api.linhengyi.xyz/v1',
            ATOMS_LLM_MODEL='chat', ATOMS_LLM_TOOL_MODE='json', ATOMS_LLM_PROTOCOL='chat_completions',
            ATOMS_MAX_OUTPUT_TOKENS='8192',
            ATOMS_LLM_CONFIG_REVISION='gateway-chat-json-dev-v2', ATOMS_ADDR='127.0.0.1:8090',

@@ -16,10 +16,10 @@
 *.db-shm
 *.db-wal
 *.log
+*.tsbuildinfo
 __pycache__/
 .archify/**/.archify-*
-
-/.archify/
-/docs/aliyun-resources-*.json
-/docs/aliyun-resources-*.md
-/web/*.tsbuildinfo
+/.archify/**/*.browser-check.json
+/.archify/**/*.delivery.json
+/.archify/**/*.finalize.json
+/.archify/**/*.finalize-summary.json

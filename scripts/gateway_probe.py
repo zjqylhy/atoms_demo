@@ -5,7 +5,7 @@ import urllib.request
 
 secret = getpass.getpass("Gateway API key (hidden): ")
 request = urllib.request.Request(
-    "https://gateway.example.com/v1/models",
+    "https://api.linhengyi.xyz/v1/models",
     headers={"Authorization": "Bearer " + secret},
 )
 try:

@@ -10,8 +10,39 @@ import (
 	"mockatoms/internal/core"
 	"net/http"
 	"net/url"
+	"path"
 	"time"
 )
+
+const maxRunRepairs = 5
+
+func executionType(args map[string]any) string {
+	switch str(args, "kind") {
+	case "go":
+		return "go"
+	case "web":
+		return "web"
+	}
+	switch path.Ext(str(args, "entry")) {
+	case ".py":
+		return "python"
+	case ".ts", ".mts", ".cts", ".tsx":
+		return "typescript"
+	default:
+		return "javascript"
+	}
+}
+
+func reportExecution(r core.Report) string {
+	if r.Kind != "run" {
+		return ""
+	}
+	var details struct {
+		Execution string `json:"execution"`
+	}
+	_ = json.Unmarshal(r.Details, &details)
+	return details.Execution
+}
 
 func (e *Engine) executeRunner(ctx context.Context, s scope, c core.Call, args map[string]any, p *core.Project) (string, error) {
 	if e.Config.RunnerURL == "" || e.Config.RunnerToken == "" {
@@ -36,8 +67,9 @@ func (e *Engine) executeRunner(ctx context.Context, s scope, c core.Call, args m
 			}
 		}
 	}
-	if failures >= 3 {
-		return "", errors.New("自动运行修复已达到两轮上限，请查看失败记录后调整任务")
+	// The initial failed execution does not use one of the repair attempts.
+	if failures > maxRunRepairs {
+		return "", fmt.Errorf("自动运行修复已达到 %d 次上限，请查看失败记录后调整任务", maxRunRepairs)
 	}
 	files, err := e.Store.Files(s.Owner, p.Files)
 	if err != nil {
@@ -91,6 +123,8 @@ func (e *Engine) executeRunner(ctx context.Context, s scope, c core.Call, args m
 	kind := "run"
 	if c.Function.Name == "test_preview" {
 		kind = "browser"
+	} else {
+		result.Details["execution"] = executionType(args)
 	}
 	report := core.Report{ID: jobID, Kind: kind, Digest: digest, At: core.Now(), Status: result.Status, Checks: result.Checks, Details: json.RawMessage(core.JSON(result.Details))}
 	return e.record(s, c, nil, func(p *core.Project) (any, error) {

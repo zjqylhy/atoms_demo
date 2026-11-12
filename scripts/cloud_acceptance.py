@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import threading
 import time
@@ -28,8 +29,10 @@ def sample():
     count = 0
     while not stop.is_set():
         mem = {line.split(':')[0]: int(line.split()[1]) for line in Path('/proc/meminfo').read_text().splitlines()}
+        cpu = [int(field) for field in Path('/proc/stat').read_text().splitlines()[0].split()[1:9]]
         samples.append({'at': time.time(), 'available_kib': mem['MemAvailable'],
-                        'load1': float(Path('/proc/loadavg').read_text().split()[0])})
+                        'load1': float(Path('/proc/loadavg').read_text().split()[0]),
+                        'cpu_total': sum(cpu), 'cpu_idle': cpu[3] + cpu[4]})
         if count % 10 == 0:
             start = time.monotonic()
             try:
@@ -50,9 +53,21 @@ finally:
     stop.set()
     observer.join()
 after = services()
+
+def busy_percent(first, last):
+    total = last['cpu_total'] - first['cpu_total']
+    idle = last['cpu_idle'] - first['cpu_idle']
+    return round(100 * (1 - idle / total), 1) if total > 0 else 0
+
+
 report = {'started': started, 'duration_s': round(time.time()-started, 2),
           'exit_code': result.returncode, 'existing_services_unchanged': before == after,
           'minimum_available_mib': round(min(s['available_kib'] for s in samples)/1024, 1),
+          'initial_available_mib': round(samples[0]['available_kib']/1024, 1),
+          'mean_cpu_busy_percent': busy_percent(samples[0], samples[-1]),
+          'peak_sample_cpu_busy_percent': max((busy_percent(a, b) for a, b in zip(samples, samples[1:])), default=0),
+          'cpu_count': os.cpu_count(),
+          'disk_free_gib': round(shutil.disk_usage(root).free/1024**3, 2),
           'gateway_health': health, 'samples': samples, 'services_before': before, 'services_after': after}
 (root/'artifacts').mkdir(exist_ok=True)
 (root/'artifacts'/Path(env.get('ATOMS_CAPACITY_REPORT','cloud-capacity.json')).name).write_text(json.dumps(report, indent=2))
