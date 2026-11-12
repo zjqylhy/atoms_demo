@@ -46,10 +46,23 @@ async function save(id, value) {
   }
   await fs.rename(tmp, target);
 }
+async function loadJob(id) {
+  try {
+    return JSON.parse(await fs.readFile(path.join(data, id + ".json"), "utf8"));
+  } catch (e) {
+    if (e.code !== "ENOENT") throw e;
+  }
+}
+function sendJob(res, record) {
+  if (record.state === "complete") send(res, 200, record.result);
+  else send(res, 409, { code: "job_running", error: "作业仍在运行" });
+}
 function validate(j) {
   if (
     !j ||
+    typeof j.id !== "string" ||
     !/^[a-f0-9]{64}$/.test(j.id) ||
+    typeof j.digest !== "string" ||
     !/^[a-f0-9]{64}$/.test(j.digest) ||
     !["run_project", "test_preview"].includes(j.action) ||
     !j.parameters ||
@@ -134,7 +147,6 @@ async function run(job, name) {
     });
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    active = { name, child };
     let out = "",
       err = "",
       timedOut = false;
@@ -185,7 +197,7 @@ async function run(job, name) {
                 : `容器未正常返回报告 (${code})：${err.slice(-3000)}`,
             },
           ],
-          details: {},
+          details: { failure_code: "container_failed" },
         };
       }
       result.details = {
@@ -233,7 +245,7 @@ async function main() {
             detail: "执行服务中断，结果未确认；保留任务记录，没有自动重复执行",
           },
         ],
-        details: {},
+        details: { failure_code: "runner_interrupted" },
       };
       await save(record.id, record);
     }
@@ -252,6 +264,15 @@ async function main() {
         !crypto.timingSafeEqual(auth, expected)
       ) {
         send(res, 401, { error: "unauthorized" });
+        return;
+      }
+      const lookup = req.method === "GET" && /^\/jobs\/([a-f0-9]{64})$/.exec(req.url);
+      if (lookup) {
+        const id = lookup[1];
+        const existing = await loadJob(id);
+        if (existing) sendJob(res, existing);
+        else if (active?.id === id) sendJob(res, { state: "running" });
+        else send(res, 404, { code: "job_not_found", error: "作业尚未登记" });
         return;
       }
       if (req.method !== "POST" || req.url !== "/jobs") {
@@ -276,50 +297,41 @@ async function main() {
         return;
       }
       const fingerprint = hash(JSON.stringify(job));
-      let existing;
-      try {
-        existing = JSON.parse(
-          await fs.readFile(path.join(data, job.id + ".json"), "utf8"),
-        );
-      } catch (e) {
-        if (e.code !== "ENOENT") throw e;
+      // Hold the slot before reading disk so concurrent submissions cannot both
+      // observe a missing record and start the same job.
+      if (!active && !closing) {
+        ownedName = "atoms-job-" + job.id.slice(0, 16) + "-" + crypto.randomBytes(4).toString("hex");
+        active = { name: ownedName, id: job.id, fingerprint };
       }
+      const existing = (await loadJob(job.id)) ||
+        (!ownedName && active?.id === job.id ? active : undefined);
       if (existing) {
+        if (ownedName) active = undefined;
         if (existing.fingerprint !== fingerprint) {
-          send(res, 409, { error: "相同任务标识的内容发生变化" });
-          return;
+          send(res, 409, { code: "job_conflict", error: "相同作业标识的内容发生变化" });
+        } else {
+          sendJob(res, existing);
         }
-        if (existing.state === "complete") {
-          send(res, 200, existing.result);
-          return;
-        }
-        send(res, 409, { error: "该任务尚在运行，尚未确认结果" });
         return;
       }
-      if (active || closing) {
-        send(res, 429, { error: "执行节点忙，请稍后继续" });
+      if (!ownedName) {
+        send(res, 429, { code: "job_busy", error: "执行节点忙，请稍后继续" });
         return;
       }
-      const name =
-        "atoms-job-" +
-        job.id.slice(0, 16) +
-        "-" +
-        crypto.randomBytes(4).toString("hex");
-      active = { name };
-      ownedName = name;
       const record = {
         id: job.id,
         digest: job.digest,
         fingerprint,
         state: "running",
-        container: name,
+        container: ownedName,
       };
       await save(job.id, record);
-      const resultPromise = run(job, name);
+      const resultPromise = run(job, ownedName);
       const onClose = () => {
-        if (!res.writableEnded && active?.name === name) active?.cancel?.();
+        if (!res.writableEnded && active?.name === ownedName) active?.cancel?.();
       };
       res.once("close", onClose);
+      if (res.destroyed || closing) onClose();
       const result = await resultPromise;
       res.removeListener("close", onClose);
       record.state = "complete";

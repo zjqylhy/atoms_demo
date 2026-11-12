@@ -50,6 +50,12 @@ async function post(body, auth = token) {
   });
   return { status: r.status, body: await r.json() };
 }
+async function lookup(id, auth = token) {
+  const r = await fetch(base + "/jobs/" + id, {
+    headers: { Authorization: "Bearer " + auth },
+  });
+  return { status: r.status, body: await r.json() };
+}
 async function run(name, j, want) {
   const start = Date.now();
   const r = await post(j);
@@ -98,7 +104,10 @@ async function run(name, j, want) {
       "run_project",
       { kind: "script", entry: "sum.js", expected_stdout: "10" },
     );
+    assert.equal((await lookup(js.id, "invalid")).status, 401);
+    assert.equal((await lookup(js.id)).body.code, "job_not_found");
     const first = await run("node-output", js, "passed");
+    assert.deepEqual(await lookup(js.id), first);
     const duplicate = await post(js);
     assert.deepEqual(duplicate.body, first.body);
     results.push({ name: "same-job-id-not-reexecuted", status: "passed" });
@@ -107,6 +116,7 @@ async function run(name, j, want) {
       parameters: { ...js.parameters, expected_stdout: "12" },
     });
     assert.equal(clash.status, 409);
+    assert.equal(clash.body.code, "job_conflict");
     await run(
       "wrong-expectation",
       job({ "sum.js": "console.log(10)" }, "run_project", {
@@ -143,6 +153,17 @@ async function run(name, j, want) {
       "passed",
     );
     assert.deepEqual(go.body.checks.map(({ name }) => name), ["go_build", "go_test"]);
+    const brokenGo = await run(
+      "go-build-failure-is-artifact-failure",
+      job({
+        "go.mod": "module example.test/sample\n\ngo 1.21\n",
+        "main.go": "package main\nfunc main() { missingSymbol() }\n",
+      }, "run_project", { kind: "go", entry: "go.mod" }),
+      "failed",
+    );
+    assert.equal(brokenGo.body.checks[0].name, "go_build");
+    assert.match(brokenGo.body.checks[0].detail, /undefined: missingSymbol/);
+    assert.equal(brokenGo.body.details.failure_code, undefined);
     const page = {
       "index.html":
         '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><h1>Counter</h1><form id="counter-form"><button id="plus">Add</button></form><output id="count">0</output><script src="app.js"></script></body></html>',
@@ -203,15 +224,26 @@ async function run(name, j, want) {
       ),
       "passed",
     );
-    await run(
-      "infinite-loop-terminated",
-      job({ "loop.js": "while(true){}" }, "run_project", {
-        kind: "script",
-        entry: "loop.js",
-        expected_stdout: "",
-      }),
-      "failed",
-    );
+    const loop = job({ "loop.js": "while(true){}" }, "run_project", {
+      kind: "script", entry: "loop.js", expected_stdout: "",
+    });
+    const [report] = await Promise.all([
+      run("infinite-loop-terminated", loop, "failed"),
+      (async () => {
+        let current;
+        for (let i = 0; i < 100; i++) {
+          current = await lookup(loop.id);
+          if (current.body.code === "job_running") break;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        assert.equal(current.body.code, "job_running");
+        assert.equal((await post(loop)).body.code, "job_running");
+        const other = { ...js, id: crypto.randomBytes(32).toString("hex") };
+        assert.equal((await post(other)).body.code, "job_busy");
+      })(),
+    ]);
+    assert.deepEqual(await lookup(loop.id), report);
+    results.push({ name: "running-job-lookup-and-busy-response", status: "passed" });
     assert.equal(
       (await post(job({ "../escape.js": "x" }, "run_project", {}))).status,
       400,
