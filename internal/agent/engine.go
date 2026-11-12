@@ -343,12 +343,12 @@ func (e *Engine) runFrame(ctx context.Context, s scope) (string, error) {
 					break
 				}
 				if !notified {
-					if err := e.noteModelWait(s, f.Role, "等待模型调用额度，已保存工作继续保留"); err != nil {
+					if err := e.noteWait(s, "model_wait", f.Role, "等待模型调用额度，已保存工作继续保留"); err != nil {
 						return "", err
 					}
 					notified = true
 				}
-				if err := waitForModel(ctx, wait); err != nil {
+				if err := waitForRetry(ctx, wait); err != nil {
 					return "", err
 				}
 			}
@@ -396,10 +396,10 @@ func (e *Engine) runFrame(ctx context.Context, s scope) (string, error) {
 				if wait <= 0 {
 					wait = time.Second
 				}
-				if err := e.noteModelWait(s, f.Role, fmt.Sprintf("网关每分钟 Token 额度不足，等待后重试（%d/%d）", tpmRetries, maxTPMRetries)); err != nil {
+				if err := e.noteWait(s, "model_wait", f.Role, fmt.Sprintf("网关每分钟 Token 额度不足，等待后重试（%d/%d）", tpmRetries, maxTPMRetries)); err != nil {
 					return "", err
 				}
-				if err := waitForModel(ctx, wait); err != nil {
+				if err := waitForRetry(ctx, wait); err != nil {
 					return "", err
 				}
 				continue
@@ -487,18 +487,18 @@ func (e *Engine) runFrame(ctx context.Context, s scope) (string, error) {
 	}
 }
 
-func (e *Engine) noteModelWait(s scope, role, message string) error {
+func (e *Engine) noteWait(s scope, kind, role, message string) error {
 	_, err := e.Store.Mutate(s.Owner, s.Project, nil, func(p *core.Project) error {
 		if err := p.Fence(s.Run, s.Epoch); err != nil {
 			return err
 		}
-		p.Event("model_wait", role, message, nil)
+		p.Event(kind, role, message, nil)
 		return nil
 	})
 	return err
 }
 
-func waitForModel(ctx context.Context, wait time.Duration) error {
+func waitForRetry(ctx context.Context, wait time.Duration) error {
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
