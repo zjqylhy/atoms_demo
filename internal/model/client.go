@@ -124,6 +124,34 @@ func (c *Client) Generate(ctx context.Context, messages []core.ModelMessage, too
 }
 
 func (c *Client) GeneratePrepared(ctx context.Context, request PreparedRequest, tools []Tool) (core.ModelMessage, core.Usage, error) {
+	m, usage, err := c.complete(ctx, request)
+	if err != nil {
+		return m, usage, err
+	}
+	if c.Config.ToolMode == "json" {
+		raw := m.Content
+		m, err = parseJSONAction(raw, tools)
+		if err != nil {
+			return core.ModelMessage{Role: "assistant", Content: raw, InvalidAction: true}, usage, &ActionFormatError{Reason: err.Error()}
+		}
+	}
+	if m.Role != "assistant" || (strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0) {
+		return m, usage, errors.New("模型返回为空或角色无效")
+	}
+	if len(m.ToolCalls) > 16 {
+		return m, usage, errors.New("单次模型返回的工具请求过多")
+	}
+	seen := map[string]bool{}
+	for _, call := range m.ToolCalls {
+		if call.ID == "" || len(call.ID) > 200 || seen[call.ID] || call.Function.Name == "" || !json.Valid([]byte(call.Function.Arguments)) {
+			return m, usage, errors.New("模型工具参数或调用标识无效")
+		}
+		seen[call.ID] = true
+	}
+	return m, usage, nil
+}
+
+func (c *Client) complete(ctx context.Context, request PreparedRequest) (core.ModelMessage, core.Usage, error) {
 	if e := c.Config.ModelError(); e != nil {
 		return core.ModelMessage{}, core.Usage{}, e
 	}
@@ -232,26 +260,6 @@ func (c *Client) GeneratePrepared(ctx context.Context, request PreparedRequest, 
 		if wire.Choices[0].Finish == "length" {
 			return m, usage, errors.New("模型输出被长度限制截断，未执行不完整工具")
 		}
-		if c.Config.ToolMode == "json" {
-			raw := m.Content
-			m, e = parseJSONAction(raw, tools)
-			if e != nil {
-				return core.ModelMessage{Role: "assistant", Content: raw, InvalidAction: true}, usage, &ActionFormatError{Reason: e.Error()}
-			}
-		}
-	}
-	if m.Role != "assistant" || (strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0) {
-		return m, usage, errors.New("模型返回为空或角色无效")
-	}
-	if len(m.ToolCalls) > 16 {
-		return m, usage, errors.New("单次模型返回的工具请求过多")
-	}
-	seen := map[string]bool{}
-	for _, call := range m.ToolCalls {
-		if call.ID == "" || len(call.ID) > 200 || seen[call.ID] || call.Function.Name == "" || !json.Valid([]byte(call.Function.Arguments)) {
-			return m, usage, errors.New("模型工具参数或调用标识无效")
-		}
-		seen[call.ID] = true
 	}
 	return m, usage, nil
 }

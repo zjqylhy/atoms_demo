@@ -327,6 +327,9 @@ func (e *Engine) runFrame(ctx context.Context, s scope) (string, error) {
 				return "", err
 			}
 			generate = func() (core.ModelMessage, core.Usage, error) {
+				if prepared.dialogue != nil {
+					return client.GenerateDialogue(ctx, prepared.request)
+				}
 				return client.GeneratePrepared(ctx, prepared.request, tools)
 			}
 			reserveTokens = prepared.request.ReservationTokens()
@@ -359,13 +362,21 @@ func (e *Engine) runFrame(ctx context.Context, s scope) (string, error) {
 			}
 			if prepared.replacement != nil {
 				p.Tasks[s.Task].Frames[s.Frame].Context = prepared.replacement
+				afterBytes := prepared.request.ByteSize()
+				if prepared.dialogue != nil {
+					afterBytes = prepared.dialogue.previous
+				}
 				p.Event("context_compacted", f.Role, "已压缩旧执行记录，继续处理", map[string]int{
-					"before_bytes": prepared.beforeBytes, "after_bytes": prepared.request.ByteSize(),
+					"before_bytes": prepared.beforeBytes, "after_bytes": afterBytes, "level": 1,
 				})
 			}
 			p.Runs[s.Run].Calls++
 			p.Runs[s.Run].Usage.Known = false
-			p.Event("model_call", f.Role, "正在处理", nil)
+			if prepared.dialogue != nil {
+				p.Event("model_call", f.Role, "正在生成旧对话摘要", map[string]any{"purpose": "dialogue_summary", "request_bytes": prepared.request.ByteSize()})
+			} else {
+				p.Event("model_call", f.Role, "正在处理", nil)
+			}
 			return nil
 		})
 		if err != nil {
@@ -395,6 +406,11 @@ func (e *Engine) runFrame(ctx context.Context, s scope) (string, error) {
 			}
 		} else {
 			tpmRetries = 0
+		}
+		var dialogue *core.DialogueSummary
+		var dialogueAfter int
+		if err == nil && prepared.dialogue != nil {
+			dialogue, dialogueAfter, err = prepared.dialogue.accept(message.Content)
 		}
 		if err != nil {
 			var formatError *model.ActionFormatError
@@ -426,6 +442,9 @@ func (e *Engine) runFrame(ctx context.Context, s scope) (string, error) {
 					return nil
 				})
 			}
+			if prepared.dialogue != nil {
+				return "", fmt.Errorf("对话摘要失败，进度已保留：%w", err)
+			}
 			return "", err
 		}
 		_, err = e.Store.Mutate(s.Owner, s.Project, nil, func(p *core.Project) error {
@@ -435,6 +454,13 @@ func (e *Engine) runFrame(ctx context.Context, s scope) (string, error) {
 			r := p.Runs[s.Run]
 			addUsage(r, usage)
 			frame := p.Tasks[s.Task].Frames[s.Frame]
+			if dialogue != nil {
+				frame.Dialogue = dialogue
+				p.Event("context_compacted", f.Role, "已保存旧对话摘要", map[string]int{
+					"before_bytes": prepared.dialogue.previous, "after_bytes": dialogueAfter, "level": 2,
+				})
+				return nil
+			}
 			frame.Messages = append(frame.Messages, message)
 			if message.Content != "" {
 				p.Message(frame.Role, message.Content, "agent")
@@ -452,6 +478,9 @@ func (e *Engine) runFrame(ctx context.Context, s scope) (string, error) {
 		})
 		if err != nil {
 			return "", err
+		}
+		if dialogue != nil {
+			continue
 		}
 		// A valid reply ends this action's repair sequence. Run.FormatRepairs remains cumulative.
 		formatRetries = 0
