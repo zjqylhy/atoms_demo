@@ -179,6 +179,14 @@ func (e *Engine) executeRunner(ctx context.Context, s scope, c core.Call, args m
 		FrameID: s.Frame, CallID: c.ID, InstructionVersion: s.InstructionVersion,
 		JobID: core.Hash([]byte(s.Task + "/" + s.Frame + "/" + c.ID)),
 	}
+	if pending := p.Tasks[s.Task].RunnerAction; pending != nil {
+		if pending.FrameID == s.Frame && pending.CallID == c.ID {
+			return e.runRunner(ctx, s, c, args, p, *pending, true)
+		}
+		return e.record(s, c, nil, func(*core.Project) (any, error) {
+			return nil, errors.New("还有未确认的原作业，必须先核对原作业，不能启动新作业")
+		})
+	}
 	return e.runRunner(ctx, s, c, args, p, action, false)
 }
 

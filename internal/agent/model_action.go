@@ -17,6 +17,12 @@ func (e *Engine) beginModelCall(s scope, role string, prepared preparedContext) 
 	if err := s.checkInstruction(p); err != nil {
 		return err
 	}
+	if reason := e.delegationBoundary(p, s, false); reason != "" {
+		return errDelegateBudget
+	}
+	if p.Runs[s.Run].Calls >= e.Config.MaxCalls {
+		return errors.New("达到本次模型调用上限，进度已保存")
+	}
 	if err := e.Store.ReserveCall(s.Owner, e.Config.DailyCalls, e.Config.WorkspaceDailyCalls); err != nil {
 		return err
 	}
@@ -35,6 +41,9 @@ func (e *Engine) beginModelCall(s scope, role string, prepared preparedContext) 
 			})
 		}
 		p.Runs[s.Run].Calls++
+		if d := p.Tasks[s.Task].Frames[s.Frame].Delegation; d != nil {
+			d.Calls++
+		}
 		p.Runs[s.Run].Usage.Known = false
 		if prepared.dialogue != nil {
 			p.Event("model_call", role, "正在生成旧对话摘要", map[string]any{"purpose": "dialogue_summary", "request_bytes": prepared.request.ByteSize()})
@@ -98,7 +107,14 @@ func (e *Engine) saveModelReply(s scope, message core.ModelMessage, usage core.U
 		if len(message.ToolCalls) == 0 {
 			if s.Frame != task.Root {
 				frame.Complete = true
-				frame.Result = message.Content
+				frame.Outcome = &core.DelegationResult{Status: "completed", Reason: "专家返回子目标结果，最终交付仍需验收", Summary: message.Content, Artifacts: core.Clone(p.Files)}
+				for key, step := range task.Steps {
+					if step.FrameID == frame.ID {
+						frame.Outcome.Evidence = append(frame.Outcome.Evidence, key)
+					}
+				}
+				task.LastHandoff = frame.Outcome
+				frame.Result = core.JSON(frame.Outcome)
 				p.Event("handoff", frame.Role, "已返回工作结果", nil)
 			} else {
 				frame.Messages = append(frame.Messages, core.ModelMessage{Role: "user", Content: nextActionPrompt})

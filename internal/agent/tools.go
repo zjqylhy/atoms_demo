@@ -26,7 +26,7 @@ func def(name, desc string, fields map[string]any, required ...string) model.Too
 	if required == nil {
 		required = []string{}
 	}
-	return model.Tool{Name: name, Description: desc, Parameters: map[string]any{"type": "object", "properties": fields, "required": required, "additionalProperties": false}}
+	return model.Tool{Control: toolProtocols[name].control, Name: name, Description: desc, Parameters: map[string]any{"type": "object", "properties": fields, "required": required, "additionalProperties": false}}
 }
 func definitions(role string) []model.Tool {
 	all := []model.Tool{
@@ -41,7 +41,7 @@ func definitions(role string) []model.Tool {
 		all = append(all,
 			def("ask_user", "提出必要问题并等待用户回答", map[string]any{"question": prop("string", "问题"), "options": listProp("string")}, "question"),
 			def("propose_plan", "保存计划及验收条件，Plan 模式会等待用户批准", map[string]any{"plan": prop("string", "Markdown 计划"), "acceptance": listProp("string")}, "plan", "acceptance"),
-			def("assign_step", "按需分派一个专家并回收工作结果；不能多层委派", map[string]any{"role": map[string]any{"type": "string", "enum": []string{"Emma", "Bob", "Alex", "David"}}, "goal": prop("string", "子目标、已确认限制、输入文件引用及验收要求")}, "role", "goal"),
+			def("assign_step", "按需分派一个专家并回收工作结果；不能多层委派", map[string]any{"role": map[string]any{"type": "string", "enum": []string{"Emma", "Bob", "Alex", "David"}}, "goal": prop("string", "子目标、已有输入及有效用户限制"), "acceptance": listProp("string"), "approach": prop("string", "模型选择的技术路线，与用户约束分开；重规划需说明改变的条件")}, "role", "goal"),
 			def("finish_task", "申请完成：后端核验产物与真实报告，通过后才形成版本", map[string]any{"summary": prop("string", "交付内容、已验证项、未覆盖项"), "answer_only": prop("boolean", "仅普通解释问答且未修改产物时为 true")}, "summary", "answer_only"))
 	case "Emma":
 		all = append(all, def("ask_user", "询问缺少的关键信息", map[string]any{"question": prop("string", "问题"), "options": listProp("string")}, "question"), def("write_document", "保存 Markdown 或文本说明", writes, "path", "content", "old_hash"))
@@ -58,6 +58,9 @@ func definitions(role string) []model.Tool {
 		all = append(all, def("write_document", "保存分析报告 Markdown", writes, "path", "content", "old_hash"),
 			def("analyze_table", "对用户原始 CSV/JSON 执行真实统计并保存结果 CSV；聚合结果固定列名 group,value，分别为分组和数值，可直接交付并生成图表，不要手工改写", map[string]any{"source": prop("string", "只读输入文件路径"), "group_by": prop("string", "分组字段，可为空"), "value": prop("string", "运算字段，count 可为空"), "operation": map[string]any{"type": "string", "enum": []string{"select", "count", "sum", "mean", "min", "max"}}, "output": prop("string", "结果 CSV 路径"), "filter_column": prop("string", "可选筛选字段"), "filter_value": prop("string", "等值筛选值"), "select_columns": listProp("string"), "sort_by": prop("string", "输出排序字段，聚合结果为 group 或 value"), "sort_order": map[string]any{"type": "string", "enum": []string{"asc", "desc"}}, "sort_numeric": prop("boolean", "select 模式是否按数值排序")}, "source", "group_by", "value", "operation", "output"),
 			def("create_chart", "引用真实分析结果生成柱状/折线图配置", map[string]any{"source": prop("string", "分析结果 CSV"), "output": prop("string", "输出 .chart.json 路径"), "kind": map[string]any{"type": "string", "enum": []string{"bar", "line"}}, "title": prop("string", "图表标题")}, "source", "output", "kind", "title"))
+	}
+	if role != "Mike" {
+		all = append(all, def("return_step", "携带事实交回主 Agent；子目标完成不等于整个任务已交付", map[string]any{"status": map[string]any{"type": "string", "enum": []string{"completed", "needs_replan", "blocked"}}, "reason": prop("string", "交回原因"), "summary": prop("string", "已完成工作与实际证据"), "todo": listProp("string")}, "status", "reason", "summary", "todo"))
 	}
 	return all
 }
@@ -76,12 +79,23 @@ func (b *boundTool) InvokableRun(ctx context.Context, raw string, _ ...tool.Opti
 	if compose.GetToolCallID(ctx) != b.call.ID {
 		return "", errors.New("工具调用关联错误")
 	}
+	if p, _, _, err := b.e.load(b.s); err == nil {
+		if _, exists := p.Tasks[b.s.Task].Steps[b.s.Frame+"/"+b.call.ID]; exists {
+			return b.e.record(b.s, b.call, nil, func(*core.Project) (any, error) { return nil, nil })
+		}
+	}
 	var args map[string]any
 	failure := json.Unmarshal([]byte(raw), &args)
 	if failure == nil {
 		failure = validateArgs(args, b.def.Parameters)
 	}
 	if failure != nil {
+		if p, _, _, err := b.e.load(b.s); err == nil {
+			fact := actionFact(p, b.s, b.call)
+			fact.Deterministic = true
+			fact.Conditions = "schema:" + core.Hash([]byte(core.JSON(b.def.Parameters)))
+			b.s.fact = &fact
+		}
 		return b.e.record(b.s, b.call, nil, func(*core.Project) (any, error) { return nil, failure })
 	}
 	return b.e.execute(ctx, b.s, b.call, args)
@@ -235,38 +249,23 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 	}
 	switch c.Function.Name {
 	case "assign_step":
-		role := str(a, "role")
-		if !permitted(t) && role != "Emma" && role != "Bob" {
-			return fail(errors.New("批准前只能分派需求或设计规划"))
-		}
-		childID := s.Frame + "/" + c.ID
-		_, err = e.Store.Mutate(s.Owner, s.Project, nil, func(p *core.Project) error {
-			if err := s.checkInstruction(p); err != nil {
-				return err
-			}
-			task := p.Tasks[s.Task]
-			if task.Frames[childID] == nil {
-				packet := map[string]any{"goal": str(a, "goal"), "task_goal": task.Goal, "plan": task.Plan, "files": p.Files, "acceptance": "按用户要求与已批准范围执行；检查引用必须是真实工具结果"}
-				task.Frames[childID] = &core.Frame{ID: childID, Role: role, Goal: str(a, "goal"), Messages: []core.ModelMessage{{Role: "user", Content: core.JSON(packet)}}}
-				p.Event("handoff", "Mike", "交给 "+role+"："+str(a, "goal"), nil)
-			}
-			return nil
-		})
-		if err != nil {
-			return "", err
-		}
-		child := s
-		child.Frame = childID
-		result, err := e.runFrame(ctx, child)
-		redirected := errors.Is(err, errNewInstruction)
-		if err != nil && !redirected {
-			return "", err
-		}
+		return e.delegate(ctx, s, c, a, p)
+	case "return_step":
 		return e.record(s, c, nil, func(p *core.Project) (any, error) {
-			if redirected {
-				return redirectedDelegation(p, role), nil
+			frame := p.Tasks[s.Task].Frames[s.Frame]
+			outcome := &core.DelegationResult{Status: str(a, "status"), Reason: str(a, "reason"), Summary: str(a, "summary"), Todo: stringsArg(a, "todo"), Artifacts: core.Clone(p.Files)}
+			for key, step := range p.Tasks[s.Task].Steps {
+				if step.FrameID == s.Frame {
+					outcome.Evidence = append(outcome.Evidence, key)
+				}
 			}
-			return map[string]any{"role": role, "summary": result, "files": p.Files}, nil
+			sort.Strings(outcome.Evidence)
+			frame.Complete = true
+			frame.Outcome = outcome
+			frame.Result = core.JSON(outcome)
+			p.Tasks[s.Task].LastHandoff = outcome
+			p.Event("handoff", frame.Role, outcome.Reason, outcome)
+			return outcome, nil
 		})
 	case "list_files":
 		return e.record(s, c, nil, func(p *core.Project) (any, error) { return p.Files, nil })

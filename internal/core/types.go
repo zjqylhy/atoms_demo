@@ -124,15 +124,65 @@ type Usage struct {
 	Known  bool `json:"known"`
 }
 type Frame struct {
-	ID        string                     `json:"id"`
-	Role      string                     `json:"role"`
-	Goal      string                     `json:"goal"`
-	Messages  []ModelMessage             `json:"messages"`
-	Complete  bool                       `json:"complete"`
-	Result    string                     `json:"result,omitempty"`
-	Context   *ContextSummary            `json:"context_summary,omitempty"`
-	Dialogue  *DialogueSummary           `json:"dialogue_summary,omitempty"`
-	Materials map[string]WorkingMaterial `json:"materials,omitempty"`
+	ID         string                     `json:"id"`
+	Role       string                     `json:"role"`
+	Goal       string                     `json:"goal"`
+	Messages   []ModelMessage             `json:"messages"`
+	Complete   bool                       `json:"complete"`
+	Result     string                     `json:"result,omitempty"`
+	Context    *ContextSummary            `json:"context_summary,omitempty"`
+	Dialogue   *DialogueSummary           `json:"dialogue_summary,omitempty"`
+	Materials  map[string]WorkingMaterial `json:"materials,omitempty"`
+	Delegation *Delegation                `json:"delegation,omitempty"`
+	Outcome    *DelegationResult          `json:"outcome,omitempty"`
+	YieldReason string `json:"yield_reason,omitempty"`
+}
+
+type Delegation struct {
+	Subgoal     string   `json:"subgoal"`
+	GoalVersion int      `json:"goal_version"`
+	Inputs      Manifest `json:"inputs"`
+	Constraints []string `json:"constraints"`
+	Acceptance  []string `json:"acceptance"`
+	Approach    string   `json:"approach,omitempty"`
+	RunID       string   `json:"run_id"`
+	Started     string   `json:"started"`
+	Deadline    string   `json:"deadline"`
+	CallLimit   int      `json:"call_limit"`
+	Calls       int      `json:"calls"`
+}
+type DelegationResult struct {
+	Status    string   `json:"status"`
+	Reason    string   `json:"reason"`
+	Summary   string   `json:"summary,omitempty"`
+	Evidence  []string `json:"evidence,omitempty"`
+	Artifacts Manifest `json:"artifacts,omitempty"`
+	Todo      []string `json:"todo,omitempty"`
+}
+
+// ActionFact is recorded by the executor, separate from model plans or claims.
+type ActionFact struct {
+	Disposition   string   `json:"disposition"`
+	Inputs        Manifest `json:"inputs,omitempty"`
+	Outputs       Manifest `json:"outputs,omitempty"`
+	ErrorClass    string   `json:"error_class,omitempty"`
+	ErrorCode     string   `json:"error_code,omitempty"`
+	Conditions    string   `json:"conditions,omitempty"`
+	Reports       []string `json:"reports,omitempty"`
+	Recovery      string   `json:"recovery,omitempty"`
+	Deterministic bool     `json:"deterministic,omitempty"`
+	Fingerprint   string   `json:"fingerprint,omitempty"`
+}
+
+type ExecutionObservation struct {
+	Subgoal     string          `json:"subgoal"`
+	GoalVersion int             `json:"goal_version"`
+	Failures    map[string]int  `json:"failures,omitempty"`
+	Actions map[string]string `json:"actions,omitempty"`
+	Evidence    []string        `json:"evidence,omitempty"`
+	Replans     int             `json:"replans"`
+	Reason      string          `json:"reason,omitempty"`
+	Verified    map[string]bool `json:"verified,omitempty"`
 }
 
 // WorkingMaterial survives history projection and belongs to a specific frame.
@@ -164,13 +214,14 @@ type DialogueSummaryItem struct {
 	Sources []string `json:"sources"`
 }
 type Step struct {
-	ID       string `json:"id"`
-	FrameID  string `json:"frame_id"`
-	Role     string `json:"role"`
-	Tool     string `json:"tool"`
-	ArgsHash string `json:"args_hash"`
-	Result   string `json:"result"`
-	At       string `json:"at"`
+	ID       string      `json:"id"`
+	FrameID  string      `json:"frame_id"`
+	Role     string      `json:"role"`
+	Tool     string      `json:"tool"`
+	ArgsHash string      `json:"args_hash"`
+	Result   string      `json:"result"`
+	At       string      `json:"at"`
+	Fact     *ActionFact `json:"fact,omitempty"`
 }
 type Checkpoint struct {
 	ID       string   `json:"id"`
@@ -194,20 +245,23 @@ type Run struct {
 	Error         string         `json:"error,omitempty"`
 }
 type Task struct {
-	ID                  string            `json:"id"`
-	Goal                string            `json:"goal"`
-	Mode                string            `json:"mode"`
-	Status              string            `json:"status"`
-	Base                Manifest          `json:"base"`
-	Frames              map[string]*Frame `json:"frames"`
-	Root                string            `json:"root"`
-	Steps               map[string]Step   `json:"steps"`
-	Checkpoints         []Checkpoint      `json:"checkpoints"`
-	Plan                *Plan             `json:"plan,omitempty"`
-	Question            *Question         `json:"question,omitempty"`
-	RunIDs              []string          `json:"run_ids"`
-	InstructionMessages []string          `json:"instruction_messages,omitempty"`
-	RunnerAction        *RunnerAction     `json:"runner_action,omitempty"`
+	ID                  string                           `json:"id"`
+	Goal                string                           `json:"goal"`
+	Mode                string                           `json:"mode"`
+	Status              string                           `json:"status"`
+	Base                Manifest                         `json:"base"`
+	Frames              map[string]*Frame                `json:"frames"`
+	Root                string                           `json:"root"`
+	Steps               map[string]Step                  `json:"steps"`
+	Dispositions        map[string]Step                  `json:"dispositions,omitempty"`
+	Checkpoints         []Checkpoint                     `json:"checkpoints"`
+	Plan                *Plan                            `json:"plan,omitempty"`
+	Question            *Question                        `json:"question,omitempty"`
+	RunIDs              []string                         `json:"run_ids"`
+	InstructionMessages []string                         `json:"instruction_messages,omitempty"`
+	RunnerAction        *RunnerAction                    `json:"runner_action,omitempty"`
+	Observations        map[string]*ExecutionObservation `json:"observations,omitempty"`
+	LastHandoff         *DelegationResult                `json:"last_handoff,omitempty"`
 }
 
 // RunnerAction identifies the one runner tool that may still have an external job.

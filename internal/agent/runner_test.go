@@ -189,6 +189,9 @@ func TestStopRunnerWaitAndContinueOriginalJob(t *testing.T) {
 	job := call("run_project", args)
 	g := fakeModel(func(_ context.Context, m []core.ModelMessage, _ []model.Tool) (core.ModelMessage, core.Usage, error) {
 		if !strings.Contains(m[0].Content, "的 Alex。") {
+			if strings.Contains(core.JSON(m), "执行环境故障") {
+				return core.ModelMessage{}, core.Usage{}, fmt.Errorf("执行环境故障：recovered tool result received")
+			}
 			return assign, core.Usage{}, nil
 		}
 		last := m[len(m)-1]

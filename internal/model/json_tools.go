@@ -18,7 +18,7 @@ func (e *ActionFormatError) Error() string { return e.Reason }
 func (c *Client) jsonPayload(messages []core.ModelMessage, tools []Tool, _ int) any {
 	completion := "你的专家工作完成时必须返回 {\"content\":\"真实结果摘要\",\"calls\":[]}，这会把结果交回协调者，不要尝试调用 finish_task。"
 	for _, tool := range tools {
-		if tool.Name == "finish_task" {
+		if tool.Control == "finish" {
 			completion = "你是协调者，必须调用 finish_task 才能完成任务。"
 			break
 		}
