@@ -38,7 +38,8 @@ func (e *TPMThrottleError) Error() string {
 }
 
 func New(c config.Config) *Client {
-	return &Client{Config: c, HTTP: &http.Client{Timeout: 120 * time.Second, Transport: &http.Transport{Proxy: nil, MaxIdleConns: 8, IdleConnTimeout: 60 * time.Second}, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("模型服务重定向被拒绝") }}}
+	// 与线上网关 chat 路由的总超时对齐。
+	return &Client{Config: c, HTTP: &http.Client{Timeout: 300 * time.Second, Transport: &http.Transport{Proxy: nil, MaxIdleConns: 8, IdleConnTimeout: 60 * time.Second}, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("模型服务重定向被拒绝") }}}
 }
 
 // PreparedRequest keeps admission and transport on the same serialized payload.
