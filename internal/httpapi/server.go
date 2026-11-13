@@ -52,6 +52,8 @@ func New(s *store.Store, e *agent.Engine, c config.Config) http.Handler {
 	mux.HandleFunc("POST /api/auth/logout", app.logout)
 	mux.HandleFunc("GET /api/projects", app.projects)
 	mux.HandleFunc("POST /api/projects", app.projects)
+	mux.HandleFunc("GET /api/project-order", app.projectOrder)
+	mux.HandleFunc("PUT /api/project-order", app.projectOrder)
 	mux.HandleFunc("GET /api/projects/{id}", app.project)
 	mux.HandleFunc("PATCH /api/projects/{id}", app.project)
 	mux.HandleFunc("DELETE /api/projects/{id}", app.deleteProject)

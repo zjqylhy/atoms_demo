@@ -8,6 +8,8 @@ func (s *Store) migrate() error {
 	}
 	defer tx.Rollback()
 	for _, statement := range []string{
+		`CREATE TABLE IF NOT EXISTS project_order (id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL, ids BLOB NOT NULL)`,
+		`INSERT OR IGNORE INTO project_order VALUES(1,0,'[]')`,
 		`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, workspace_id TEXT NOT NULL, created TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL DEFAULT '', workspace_id TEXT NOT NULL, expires_at INTEGER NOT NULL, seen_at INTEGER NOT NULL, revoked_at INTEGER NOT NULL DEFAULT 0)`,
 		`CREATE TABLE IF NOT EXISTS workspace_accounts (workspace_id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), created TEXT NOT NULL)`,

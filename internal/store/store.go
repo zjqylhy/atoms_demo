@@ -96,10 +96,8 @@ func (s *Store) List(owner string) ([]map[string]any, error) {
 }
 
 func (s *Store) SharedProjects(sessionHash string) ([]map[string]any, error) {
-	if _, err := s.AccountSession(sessionHash); err != nil {
-		return nil, err
-	}
-	return s.listProjects(`SELECT id,title,updated FROM projects ORDER BY updated DESC,id`)
+	order, err := s.ProjectOrder(sessionHash)
+	return order.Projects, err
 }
 
 func (s *Store) listProjects(query string, args ...any) ([]map[string]any, error) {

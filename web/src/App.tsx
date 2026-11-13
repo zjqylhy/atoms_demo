@@ -5,7 +5,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Sparkles,
-  FolderOpen,
   Code2,
   Eye,
   History,
@@ -25,7 +24,6 @@ import {
   ListChecks,
   LoaderCircle,
   MessageCircle,
-  Trash2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -40,6 +38,8 @@ import { DeleteProjectDialog } from "./components/DeleteProjectDialog";
 import { FallbackNotice } from "./components/FallbackNotice";
 import { useFallbackNavigation } from "./hooks/useFallbackNavigation";
 import { parseProjectLocation, projectLocation } from "./fallbackNavigation";
+import { useProjectOrder } from "./hooks/useProjectOrder";
+import { ProjectList } from "./components/ProjectList";
 
 type FileInfo = {
   hash: string;
@@ -494,7 +494,8 @@ export default function App() {
   const userID = boot!.user!.id;
   const [initialDraft] = useState(() => readDraft(userID));
   const [initialized, setInitialized] = useState(false);
-  const [projects, setProjects] = useState<{ id: string; title: string }[]>([]);
+  const order = useProjectOrder();
+  const projects = order.projects;
   const [currentProject, setProject] = useState<Project>();
   const [text, setText] = useState(initialDraft?.text || "");
   const [mode, setMode] = useState(initialDraft?.mode || "build");
@@ -524,7 +525,6 @@ export default function App() {
   const [streamState, setStreamState] = useState("");
   const end = useRef<HTMLDivElement>(null);
   const selection = useRef("");
-  const listRevision = useRef(0);
   const restoreDraftMode = useRef(true);
   const retry = useRef<{ key: string; id: string } | undefined>(undefined);
   const fallback = useFallbackNavigation({user:userID, current:currentProject, selected:selection.current, onCommit:acceptDemo, onError:message=>{setError(message);if(message)setPane('chat');}});
@@ -559,10 +559,7 @@ export default function App() {
     setMode(task.mode);
   }, [task?.id, task?.mode]);
   async function list() {
-    const revision = ++listRevision.current;
-    const items = await api("/projects");
-    if (revision === listRevision.current) setProjects(items);
-    return items as {id:string;title:string}[];
+    return order.refresh();
   }
   function acceptDemo(demo: Project, targetVersion: string, from: string) {
     selection.current = demo.id;
@@ -633,7 +630,7 @@ export default function App() {
   useEffect(() => {
     const missing = (event: Event) => {
       const id = (event as CustomEvent<string>).detail;
-      setProjects(items => items.filter(item => item.id !== id));
+      order.remove(id);
       if (selection.current === id) { newProject(); setError("项目已被删除，已返回新建页面。"); }
     };
     window.addEventListener("atoms:project-missing", missing);
@@ -915,18 +912,7 @@ export default function App() {
         <div className="section-label">
           共享工作空间 <span>{projects.length}</span>
         </div>
-        <nav>
-          {projects.map((p) => (
-            <div className="project-row" key={p.id}><button
-              className={p.id === project?.id ? "project active" : "project"}
-              onClick={() => open(p.id)}
-            >
-              <FolderOpen size={16} />
-              <span>{p.title}</span>
-              <ChevronRight size={14} />
-            </button><button className="project-delete" aria-label={`删除项目：${p.title}`} title="删除整个项目与历史" onClick={() => setDeleting(p)}><Trash2 size={15}/></button></div>
-          ))}
-        </nav>
+        <ProjectList items={projects} selected={project?.id} saving={order.saving} notice={order.notice} onOpen={id=>void open(id)} onDelete={setDeleting} onBegin={order.begin} onCancel={order.finish} onSave={order.save}/>
         <div className="sidebar-bottom">
           <div className="availability">
             <i className={boot?.model_ready ? "green" : ""} />
@@ -1467,7 +1453,7 @@ export default function App() {
       </main>
       {deleting && <DeleteProjectDialog project={deleting} onCancel={() => setDeleting(undefined)} onDeleted={id => {
         setDeleting(undefined);
-        setProjects(items => items.filter(item => item.id !== id));
+        order.remove(id);
         if (selection.current === id) newProject();
         else if (project?.recovery?.project_id === id) setProject({...project, recovery:{...project.recovery, unavailable:true}});
         if (recentProject(userID) === id) rememberProject(userID, "");
