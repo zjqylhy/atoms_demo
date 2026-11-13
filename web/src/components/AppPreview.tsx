@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import {apiJSON} from '../api';
+
 type AppState = {schema_version:number; revision:number; value:Record<string,unknown>};
 type Access = {mode:string; grant?:string; version:string; contract?:{schema_version:number; initial_state:Record<string,unknown>}; state?:AppState};
 export function AppPreview({projectId,version,csrf,sharedToken}:{projectId:string;version:string;csrf:string;sharedToken?:string}) {
@@ -16,12 +18,7 @@ export function AppPreview({projectId,version,csrf,sharedToken}:{projectId:strin
   const pending = useRef(false);
   const receipts = useRef(new Map<string,{hash:string;revision:number}>());
   const base = sharedToken ? `/api/shares/${encodeURIComponent(sharedToken)}` : `/api/projects/${projectId}`;
-  async function api(path:string,init:RequestInit={}) {
-    const response = await fetch(base+path,{...init,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,...init.headers}});
-    const body = await response.json();
-    if (!response.ok) throw Object.assign(new Error(body.error || '数据请求失败'),{status:response.status});
-    return body;
-  }
+  function api(path:string,init:RequestInit={}) { return apiJSON(base+path,init); }
   async function grant(expectedVersion?:string) {
     const value:Access = sharedToken ? await api('') : await api('/preview-access',{method:'POST',body:JSON.stringify({version})});
     if (!active.current) throw new Error('预览已关闭');
