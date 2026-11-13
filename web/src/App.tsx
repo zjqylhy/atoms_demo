@@ -97,6 +97,7 @@ type Project = {
   tasks: Task[];
   runs: {
     id: string;
+    task_id: string;
     status: string;
     error?: string;
     calls: number;
@@ -532,6 +533,8 @@ export default function App() {
   const version = fallback.candidate?.version ?? selectedVersion;
   const path = fallback.candidate ? 'index.html' : selectedPath;
   const task = project?.tasks.find((t) => t.id === project.current_task);
+  // The API orders runs by start time; older failures must not describe a later run.
+  const latestTaskRun = task && project?.runs.filter((run) => run.task_id === task.id).at(-1);
   const running = !!project?.active_run;
   const canSteer = running && task?.status === "running";
   const question = task?.status === "waiting_input" ? task.question : undefined;
@@ -1138,9 +1141,9 @@ export default function App() {
                   {unfinished && !running && (
                     <div className="recovery">
                       <b>{statusText[task!.status]}</b>
-                      {project.runs.filter((r) => r.error).at(-1)?.error && (
+                      {latestTaskRun?.error && (
                         <p className="failure-detail">
-                          {project.runs.filter((r) => r.error).at(-1)?.error}
+                          上次运行错误：{latestTaskRun.error}
                         </p>
                       )}
                       <p>
