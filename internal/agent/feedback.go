@@ -15,5 +15,9 @@ func (e *Engine) failureFeedback(failure error) map[string]any {
 	if errors.As(failure, &problems) {
 		feedback["validation"] = json.RawMessage(e.Config.Redact(core.JSON(problems)))
 	}
+	var assessment *AcceptanceAssessment
+	if errors.As(failure, &assessment) {
+		feedback["acceptance"] = json.RawMessage(e.Config.Redact(core.JSON(assessment)))
+	}
 	return feedback
 }

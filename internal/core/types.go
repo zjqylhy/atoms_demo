@@ -132,13 +132,29 @@ type OutputDeclaration struct {
 	OldHash string `json:"old_hash"`
 }
 type ReportEvidence struct {
-	TaskID             string   `json:"task_id"`
-	InstructionVersion int      `json:"instruction_version"`
-	PlanRevision       string   `json:"plan_revision,omitempty"`
-	Inputs             Manifest `json:"inputs"`
-	Outputs            Manifest `json:"outputs,omitempty"`
-	RunID              string   `json:"run_id,omitempty"`
-	Epoch              int64    `json:"epoch,omitempty"`
+	Version            int             `json:"version,omitempty"`
+	Units              []CheckEvidence `json:"units,omitempty"`
+	TaskID             string          `json:"task_id"`
+	InstructionVersion int             `json:"instruction_version"`
+	PlanRevision       string          `json:"plan_revision,omitempty"`
+	Inputs             Manifest        `json:"inputs"`
+	Outputs            Manifest        `json:"outputs,omitempty"`
+	RunID              string          `json:"run_id,omitempty"`
+	Epoch              int64           `json:"epoch,omitempty"`
+}
+
+// CheckEvidence separates reusable verification from the immutable execution snapshot.
+// Namespace records resolution candidates: adding a file can change a module import.
+type CheckEvidence struct {
+	Kind         string   `json:"kind"`
+	Paths        []string `json:"paths"`
+	Requirement  string   `json:"requirement,omitempty"`
+	CriterionKey string   `json:"criterion_key,omitempty"`
+	Status       string   `json:"status"`
+	Dependencies Manifest `json:"dependencies"`
+	Precision    string   `json:"precision"`
+	Reason       string   `json:"reason,omitempty"`
+	Namespace    []string `json:"namespace,omitempty"`
 }
 type Question struct {
 	ID      string   `json:"id"`
@@ -199,6 +215,8 @@ type DelegationResult struct {
 
 // ActionFact is recorded by the executor, separate from model plans or claims.
 type ActionFact struct {
+	RetryVersion  int      `json:"retry_version,omitempty"`
+	RetryKeys     []string `json:"retry_keys,omitempty"`
 	Disposition   string   `json:"disposition"`
 	Inputs        Manifest `json:"inputs,omitempty"`
 	Outputs       Manifest `json:"outputs,omitempty"`
@@ -308,6 +326,8 @@ type Task struct {
 
 // RunnerAction identifies the one runner tool that may still have an external job.
 type RunnerAction struct {
+	EvidenceVersion    int      `json:"evidence_version,omitempty"`
+	EvidencePlan       *Plan    `json:"evidence_plan,omitempty"`
 	FrameID            string   `json:"frame_id"`
 	CallID             string   `json:"call_id"`
 	JobID              string   `json:"job_id"`
@@ -409,23 +429,10 @@ func (p *Project) Public() any {
 	versions := make([]Version, len(p.Versions))
 	copy(versions, p.Versions)
 	for i := range versions {
-		versions[i].PreviewReady = hasPreview(versions[i].Reports, versions[i].Manifest.Digest())
+		versions[i].PreviewReady = PreviewHTML(versions[i].Reports, versions[i].Manifest) != ""
 		versions[i].Reports = publicReports(versions[i].Reports)
 	}
-	return map[string]any{"id": p.ID, "preview_ready": hasPreview(p.Reports, p.Files.Digest()), "title": p.Title, "created": p.Created, "updated": p.Updated, "active_run": p.ActiveRun, "current_task": p.CurrentTask, "head": p.Head, "files": p.Files, "messages": p.Messages, "tasks": tasks, "runs": runs, "versions": versions, "reports": publicReports(p.Reports), "events": publicEvents(p.Events)}
-}
-
-func hasPreview(reports []Report, digest string) bool {
-	for _, r := range reports {
-		if r.Digest == digest {
-			var d map[string]any
-			_ = json.Unmarshal(r.Details, &d)
-			if html, ok := d["preview_html"].(string); ok && html != "" {
-				return true
-			}
-		}
-	}
-	return false
+	return map[string]any{"id": p.ID, "preview_ready": PreviewHTML(p.Reports, p.Files) != "", "title": p.Title, "created": p.Created, "updated": p.Updated, "active_run": p.ActiveRun, "current_task": p.CurrentTask, "head": p.Head, "files": p.Files, "messages": p.Messages, "tasks": tasks, "runs": runs, "versions": versions, "reports": publicReports(p.Reports), "events": publicEvents(p.Events)}
 }
 
 func publicReports(reports []Report) []Report {

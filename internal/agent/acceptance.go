@@ -73,6 +73,18 @@ func evidenceFor(t *core.Task, s scope, inputs, outputs core.Manifest) *core.Rep
 }
 
 func reportCurrent(p *core.Project, t *core.Task, r core.Report) bool {
+	if r.Evidence != nil && r.Evidence.Version != 0 {
+		for _, unit := range r.Evidence.Units {
+			if unitInvalidReason(p, t, r.Evidence, unit) == "" {
+				return true
+			}
+		}
+		return false
+	}
+	return legacyReportCurrent(p, t, r)
+}
+
+func legacyReportCurrent(p *core.Project, t *core.Task, r core.Report) bool {
 	if r.Evidence == nil {
 		return r.Digest == p.Files.Digest()
 	}
@@ -86,6 +98,17 @@ func reportCurrent(p *core.Project, t *core.Task, r core.Report) bool {
 	}
 	if e.PlanRevision != revision {
 		return false
+	}
+	// Legacy runner inputs were full execution snapshots. Without a path-set
+	// check, a new module could change resolution while every old hash matched.
+	if r.Kind == "run" || r.Kind == "browser" {
+		paths := core.Clone(e.Inputs)
+		for name, file := range e.Outputs {
+			paths[name] = file
+		}
+		if !slices.Equal(paths.Paths(), p.Files.Paths()) {
+			return false
+		}
 	}
 	for name, file := range e.Inputs {
 		if _, replaced := e.Outputs[name]; !replaced && p.Files[name] != file {
@@ -351,29 +374,4 @@ func artifactChecks(files map[string][]byte, assertions []core.ArtifactAssertion
 		checks = append(checks, c)
 	}
 	return checks
-}
-
-func scopedAcceptance(p *core.Project, t *core.Task) error {
-	if t == nil || t.Plan == nil || t.Plan.Delivery == nil {
-		return nil
-	}
-	for _, criterion := range t.Plan.Delivery.Criteria {
-		for _, name := range criterion.Paths {
-			passed := false
-			for _, r := range p.Reports {
-				if !reportCurrent(p, t, r) || r.Status != "passed" {
-					continue
-				}
-				for _, check := range r.Checks {
-					if check.Status == "passed" && check.Requirement == criterion.Requirement && slices.Contains(check.Paths, name) {
-						passed = true
-					}
-				}
-			}
-			if !passed {
-				return fmt.Errorf("缺少当前交付证据：%s（%s）", criterion.Requirement, name)
-			}
-		}
-	}
-	return nil
 }

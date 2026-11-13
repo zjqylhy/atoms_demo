@@ -10,7 +10,6 @@ import (
 	"io"
 	"mockatoms/internal/core"
 	"path"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -122,96 +121,9 @@ func checkArtifacts(files map[string]string, manifest core.Manifest) core.Report
 	return r
 }
 func completionCheck(p *core.Project) error {
-	task := p.Tasks[p.CurrentTask]
-	manifest, err := deliveryManifest(p, task)
-	if err != nil {
-		return err
-	}
-	if err := scopedAcceptance(p, task); err != nil {
-		return err
-	}
-	staticCovered := map[string]bool{}
-	passed := map[string]bool{}
-	for _, r := range p.Reports {
-		if !reportCurrent(p, task, r) {
-			continue
-		}
-		kind := r.Kind
-		ok := r.Status == "passed"
-		if kind == "static" && ok {
-			checked := p.Files
-			if r.Evidence != nil {
-				checked = r.Evidence.Inputs
-			}
-			for name := range checked {
-				staticCovered[name] = true
-			}
-		}
-		if execution := reportExecution(r); execution != "" {
-			kind = execution
-		}
-		if kind == "go" {
-			build, test := false, false
-			for _, check := range r.Checks {
-				build = build || (check.Name == "go_build" && check.Status == "passed")
-				test = test || (check.Name == "go_test" && check.Status == "passed")
-			}
-			ok = ok && build && test
-		}
-		passed[kind] = ok
-	}
-	// Historical reports used a single run kind for both JS scripts and web builds.
-	for _, kind := range []string{"web", "javascript"} {
-		if _, recorded := passed[kind]; !recorded {
-			passed[kind] = passed["run"]
-		}
-	}
-	for name := range manifest {
-		if !staticCovered[name] {
-			return fmt.Errorf("当前交付范围必须先通过 check_artifacts：%s", name)
-		}
-	}
-	web, script, typescript, python, golang := false, false, false, false, false
-	for name, f := range manifest {
-		if task != nil && task.Plan != nil && task.Plan.Delivery != nil {
-			d := task.Plan.Delivery
-			if !slices.Contains(d.Targets, name) && !slices.Contains(d.Preserve, name) {
-				continue
-			}
-		}
-		if f.Binary && (task == nil || task.Plan == nil || task.Plan.Delivery == nil) {
-			return errors.New("二进制交付必须声明交付对象及内容验收条件")
-		}
-		if f.ReadOnly {
-			continue
-		}
-		switch path.Ext(name) {
-		case ".html":
-			web = true
-		case ".js", ".mjs", ".cjs", ".jsx":
-			script = true
-		case ".ts", ".mts", ".cts", ".tsx":
-			typescript = true
-		case ".py":
-			python = true
-		case ".go":
-			golang = true
-		}
-	}
-	if golang && !passed["go"] {
-		return errors.New("Go 项目必须通过当前文件版本的 go build 与 go test")
-	}
-	if python && !passed["python"] {
-		return errors.New("Python 脚本必须通过当前文件版本的实际执行与输出断言")
-	}
-	if web {
-		if !passed["web"] || !passed["browser"] {
-			return errors.New("网页必须通过当前文件版本的真实运行与浏览器验收")
-		}
-	} else if typescript && !passed["typescript"] {
-		return errors.New("TypeScript 脚本必须通过当前文件版本的转译、执行与输出断言")
-	} else if script && !golang && !python && !typescript && !passed["javascript"] {
-		return errors.New("脚本必须经过真实运行和输出断言")
+	assessment := assessAcceptance(p)
+	if !assessment.Ready {
+		return assessment
 	}
 	return nil
 }
