@@ -40,6 +40,10 @@ func (s *Server) shares(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) publicShare(w http.ResponseWriter, r *http.Request) {
+	if view := r.PathValue("view"); view != "" && view != "preview" {
+		http.NotFound(w, r)
+		return
+	}
 	out, err := s.Store.Shared(r.PathValue("token"))
 	if err != nil {
 		s.appFailure(w, err)

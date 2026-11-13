@@ -16,6 +16,7 @@ const (
 )
 
 type preparedContext struct {
+	route       *core.ModelConfigRef
 	request     model.PreparedRequest
 	replacement *core.ContextSummary
 	beforeBytes int

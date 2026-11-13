@@ -99,7 +99,11 @@ export function AppPreview({projectId,version,csrf,sharedToken}:{projectId:strin
   }
   return <div className="app-preview">
     <div className={'app-data-bar '+(problem?'error':'')} role="status"><span>{status}</span>
-      {access?.contract && <><button onClick={()=>load().then(data=>download(data,'atoms-data.json')).catch(error=>{setStatus(error.message);setProblem(true);})}>导出数据</button>
+      {access?.mode==='incompatible' && <><button onClick={()=>download(access.state,'atoms-data-before-reset.json')}>导出原数据</button><button onClick={async()=>{
+        if(!confirm('新代码的数据格式与原数据不兼容。确认备份原数据并使用新版初始数据？原数据保留在最近 3 次备份中。'))return;
+        try{await api('/app-state/reset',{method:'POST',body:JSON.stringify({version:access.version,expected_revision:access.state!.revision,request_id:crypto.randomUUID()})});await grant();setReload(n=>n+1);}catch(error){setStatus((error as Error).message);setProblem(true);}
+      }}>备份并重置为新版</button></>}
+      {access?.contract && access.mode!=='incompatible' && <><button onClick={()=>load().then(data=>download(data,'atoms-data.json')).catch(error=>{setStatus(error.message);setProblem(true);})}>导出数据</button>
         <label className="data-import">导入数据<input type="file" accept=".json,application/json" hidden onChange={async event=>{
           const file=event.target.files?.[0];event.target.value='';if(!file)return;
           try {if(file.size>270000)throw new Error('文件超过大小限制');const value=JSON.parse(await file.text()) as AppState;
@@ -108,7 +112,7 @@ export function AppPreview({projectId,version,csrf,sharedToken}:{projectId:strin
             const before=await load();await save(value.value,before.revision,crypto.randomUUID(),true);setReload(n=>n+1);
           }catch(error){setStatus((error as Error).message);setProblem(true);}
         }}/></label></>}
-      {access?.mode==='formal' && <button onClick={()=>api('/app-backups').then(data=>download(data,'atoms-data-backups.json')).catch(error=>setStatus(error.message))}>下载备份</button>}
+      {(access?.mode==='formal'||access?.mode==='incompatible') && <button onClick={()=>api('/app-backups').then(data=>download(data,'atoms-data-backups.json')).catch(error=>setStatus(error.message))}>下载备份</button>}
     </div>
     {access && <iframe ref={frame} key={reload} title="生成产物预览" sandbox="allow-scripts allow-forms" onLoad={connect} src={`${base}/preview?version=${encodeURIComponent(version)}&instance=${instance}`}/>}
   </div>;

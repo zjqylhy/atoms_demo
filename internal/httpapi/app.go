@@ -71,3 +71,17 @@ func (s *Server) appBackups(w http.ResponseWriter, r *http.Request) {
 	}
 	send(w, 200, backups)
 }
+
+func (s *Server) resetAppState(w http.ResponseWriter, r *http.Request) {
+	var in store.ResetAppRequest
+	if err := decode(r, &in); err != nil {
+		s.appFailure(w, err)
+		return
+	}
+	revision, err := s.Store.ResetAppState(sessionOf(r).TokenHash, r.PathValue("id"), in)
+	if err != nil {
+		s.appFailure(w, err)
+		return
+	}
+	send(w, 200, map[string]any{"revision": revision, "saved": true})
+}

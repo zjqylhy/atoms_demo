@@ -55,6 +55,25 @@ func TestMissingModelCreatesDistinctPersistentDemoWithoutCharging(t *testing.T) 
 	if len(list) != 2 {
 		t.Fatal("duplicated fallback", len(list))
 	}
+	if _, err = e.Start("alice", p.ID, "", "build", "retry-original", "continue", ""); err != nil {
+		t.Fatal(err)
+	}
+	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.ActiveRun == "" })
+	list, _ = e.Store.List("alice")
+	if len(list) != 2 || p.Recovery.ProjectID != demo.ID {
+		t.Fatal("retry created another demo")
+	}
+	plan, err := e.Store.Create("alice", "unapproved plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = e.Start("alice", plan.ID, "规划网页", "plan", "plan-no-model", "submit", ""); err != nil {
+		t.Fatal(err)
+	}
+	plan = waitProject(t, e, plan.ID, func(p *core.Project) bool { return p.ActiveRun == "" })
+	if plan.Recovery != nil {
+		t.Fatal("unapproved plan created an implementation")
+	}
 }
 
 func TestHTTPServiceRetryAndBackupChargeEverySend(t *testing.T) {
@@ -104,5 +123,32 @@ func TestHTTPServiceRetryAndBackupChargeEverySend(t *testing.T) {
 func TestStopAndWaitingDoNotCreateDemo(t *testing.T) {
 	if demoFailure(context.Canceled) || demoFailure(core.ErrWaiting) || demoFailure(core.ErrStale) || demoFailure(errors.New("执行器不可用")) {
 		t.Fatal("unrelated failure became model fallback")
+	}
+}
+
+func TestBothModelRoutesFailToOneDemoWithoutExtraBackupRetries(t *testing.T) {
+	var sends atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sends.Add(1)
+		if strings.HasPrefix(r.URL.Path, "/backup/") {
+			w.WriteHeader(503)
+		} else {
+			w.WriteHeader(401)
+		}
+		_, _ = w.Write([]byte(`{"error":{"message":"unavailable"}}`))
+	}))
+	defer upstream.Close()
+	cfg := config.Config{Protocol: "chat_completions", BaseURL: upstream.URL, Model: "test", APIKey: "primary-secret", BackupBaseURL: upstream.URL + "/backup", BackupModel: "test", BackupAPIKey: "backup-secret"}
+	e, p := testEngine(t, model.New(cfg))
+	e.Config.Protocol = cfg.Protocol
+	e.Config.BackupBaseURL = cfg.BackupBaseURL
+	e.Config.BackupModel = cfg.BackupModel
+	e.Config.BackupAPIKey = cfg.BackupAPIKey
+	if _, err := e.Start("alice", p.ID, "构建应用", "build", "both-routes-fail", "submit", ""); err != nil {
+		t.Fatal(err)
+	}
+	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.ActiveRun == "" })
+	if sends.Load() != 2 || p.Recovery == nil || p.Tasks[p.CurrentTask].Status != "failed" {
+		t.Fatal(sends.Load(), core.JSON(p.Public()))
 	}
 }

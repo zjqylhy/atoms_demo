@@ -4,6 +4,7 @@ import (
 	"embed"
 	"encoding/json"
 	"errors"
+	"mockatoms/internal/appruntime"
 	"mockatoms/internal/core"
 )
 
@@ -43,6 +44,9 @@ func Get(id string) (Bundle, error) {
 	}
 	if b.ID != id || core.Hash([]byte(b.HTML)) != b.HTMLHash || len(b.Verification.Checks) == 0 {
 		return b, errors.New("预置成果校验失败")
+	}
+	if b.Files[core.AppRuntimePath] != appruntime.SDK {
+		return b, errors.New("预置成果运行库已变化，请重新构建并验证示例")
 	}
 	for name, content := range b.Files {
 		if b.SourceHashes[name] != core.Hash([]byte(content)) {

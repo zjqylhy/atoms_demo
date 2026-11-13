@@ -106,6 +106,7 @@ async function checkBrowser(
       let app = page.frames().find(frame => frame.url().startsWith(url+'/app?'));
       if(!app) throw Error('预览框架未加载');
       check(`startup_${width}`, "Chromium 实际加载完成");
+      let lastSavedRevision = 0;
       for (let i = 0; i < steps.length; i++) {
         const s = steps[i];
         const loc = app.locator(s.selector || 'body');
@@ -117,7 +118,8 @@ async function checkBrowser(
               app = page.frames().find(frame => frame.url().startsWith(url+'/app?'));
               break;
             case "expect_saved":
-              await page.waitForFunction(() => window.savedRevision > 0);
+              await page.waitForFunction(previous => window.savedRevision > previous,lastSavedRevision);
+              lastSavedRevision = await page.evaluate(() => window.savedRevision);
               break;
             case "click":
               await loc.click();

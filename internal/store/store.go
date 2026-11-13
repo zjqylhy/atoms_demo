@@ -130,8 +130,15 @@ func (s *Store) Mutate(owner, id string, blobs map[string][]byte, f func(*core.P
 	if e != nil {
 		return nil, e
 	}
+	previousHead := p.Head
 	if e = f(p); e != nil {
 		return nil, e
+	}
+	if p.Head != previousHead {
+		// Reverting to an old version must not resurrect its previous ports/grants.
+		if _, e = tx.Exec(`DELETE FROM preview_grants WHERE project_id=?`, id); e != nil {
+			return nil, e
+		}
 	}
 	if e = p.Files.Validate(); e != nil {
 		return nil, e

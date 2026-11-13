@@ -62,6 +62,7 @@ func TestRegisterLoginImportAndLogoutHTTP(t *testing.T) {
 	}
 	b := newClient()
 	_, other := request(b, "/api/bootstrap", "", "")
+	_, visitorProject := request(b, "/api/projects", other["csrf"].(string), `{"title":"keep guest separate"}`)
 	if status, _ := request(b, "/api/projects/"+projectID, "", ""); status != 404 {
 		t.Fatal("guest read private", status)
 	}
@@ -85,5 +86,11 @@ func TestRegisterLoginImportAndLogoutHTTP(t *testing.T) {
 	}
 	if status, _ := request(a, "/api/projects/"+projectID, "", ""); status != 200 {
 		t.Fatal("logout revoked other device", status)
+	}
+	if status, _ := request(b, "/api/bootstrap", "", ""); status != 200 {
+		t.Fatal(status)
+	}
+	if status, _ := request(b, "/api/projects/"+visitorProject["id"].(string), "", ""); status != 200 {
+		t.Fatal("skipped import lost guest access", status)
 	}
 }

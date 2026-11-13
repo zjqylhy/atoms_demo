@@ -62,6 +62,7 @@ func New(s *store.Store, e *agent.Engine, c config.Config) http.Handler {
 	mux.HandleFunc("POST /api/projects/{id}/preview-access", app.previewAccess)
 	mux.HandleFunc("GET /api/projects/{id}/app-state", app.appState)
 	mux.HandleFunc("PUT /api/projects/{id}/app-state", app.appState)
+	mux.HandleFunc("POST /api/projects/{id}/app-state/reset", app.resetAppState)
 	mux.HandleFunc("GET /api/projects/{id}/app-backups", app.appBackups)
 	mux.HandleFunc("GET /api/projects/{id}/shares", app.shares)
 	mux.HandleFunc("POST /api/projects/{id}/shares", app.shares)
@@ -95,6 +96,9 @@ func decode(r *http.Request, v any) error {
 }
 func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	ready := s.Config.ModelError() == nil
+	if _, backupReady := s.Config.Backup(); backupReady {
+		ready = true
+	}
 	var user any
 	session := sessionOf(r)
 	notice := "游客数据保存在服务端；注册账号后可跨设备恢复，清除游客 Cookie 后无法自动找回。"

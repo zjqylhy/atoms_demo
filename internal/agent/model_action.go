@@ -47,9 +47,9 @@ func (e *Engine) beginModelCall(s scope, role string, prepared preparedContext) 
 		}
 		p.Runs[s.Run].Usage.Known = false
 		if prepared.dialogue != nil {
-			p.Event("model_call", role, "正在生成旧对话摘要", map[string]any{"purpose": "dialogue_summary", "request_bytes": prepared.request.ByteSize()})
+			p.Event("model_call", role, "正在生成旧对话摘要", map[string]any{"purpose": "dialogue_summary", "request_bytes": prepared.request.ByteSize(), "model": prepared.route})
 		} else {
-			p.Event("model_call", role, "正在处理", nil)
+			p.Event("model_call", role, "正在处理", map[string]any{"model": prepared.route})
 		}
 		return nil
 	})

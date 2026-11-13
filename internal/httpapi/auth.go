@@ -74,6 +74,27 @@ func (s *Server) sessionMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		publicCatalog := r.Method == "GET" && (r.URL.Path == "/api/catalog" || strings.HasPrefix(r.URL.Path, "/api/catalog/"))
 		publicShare := r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/shares/")
+		if publicShare || publicCatalog {
+			key := "public:" + s.clientIP(r)
+			now := time.Now()
+			s.mu.Lock()
+			limit := s.rates[key]
+			if now.Sub(limit.At) > time.Minute {
+				limit = window{At: now}
+			}
+			limit.Count++
+			s.rates[key] = limit
+			for key, item := range s.rates {
+				if now.Sub(item.At) > 2*time.Minute {
+					delete(s.rates, key)
+				}
+			}
+			s.mu.Unlock()
+			if limit.Count > 300 {
+				s.fail(w, 429, errors.New("访问过于频繁，请稍后重试"))
+				return
+			}
+		}
 		if !strings.HasPrefix(r.URL.Path, "/api/") || publicCatalog || publicShare {
 			next.ServeHTTP(w, r)
 			return

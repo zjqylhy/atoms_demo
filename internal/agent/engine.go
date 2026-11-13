@@ -426,6 +426,8 @@ nextAction:
 			if err != nil {
 				return "", err
 			}
+			route := client.Config.Ref()
+			prepared.route = &route
 			generate = func() (core.ModelMessage, core.Usage, error) {
 				callCtx, cancel := e.modelContext(ctx, f)
 				defer cancel()
@@ -513,6 +515,9 @@ nextAction:
 			return "", reply.failure
 		}
 		if prepared.dialogue != nil {
+			transportRetries = 0
+			generator = e.Model
+			backupUsed = false
 			continue
 		}
 		// A valid reply ends this action's repair sequence. Run.FormatRepairs remains cumulative.
