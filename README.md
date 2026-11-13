@@ -43,7 +43,7 @@ go run ./cmd/server
 | `ATOMS_LLM_TOOL_MODE` | `native` 或 `json`；JSON 适配仅支持 Chat Completions |
 | `ATOMS_MAX_OUTPUT_TOKENS / LLM_TPM` | 输出上限和每分钟预留额度；示例沿用现有网关的 81,920 / 1,000,000，需按实际模型能力与预算配置 |
 | `ATOMS_BACKUP_LLM_BASE_URL / MODEL / API_KEY` | 可选单一备用，沿用主通道协议和额度 |
-| `ATOMS_RUN_SECONDS` | 整轮总时限，默认 1200 秒（20 分钟）；委派共用剩余时间，默认给主 Agent 预留 30 秒收尾 |
+| `ATOMS_RUN_SECONDS` | 整轮总时限，默认 3600 秒（1 小时）；委派共用剩余时间，默认给主 Agent 预留 30 秒收尾 |
 | `ATOMS_RUNNER_URL / RUNNER_TOKEN` | 独立执行器地址及共享随机凭据，至少 24 字符 |
 | `ATOMS_DATA_DIR / WEB_DIR / ADDR` | 数据目录、前端构建目录、监听地址 |
 | `ATOMS_PUBLIC_URL` | 公网 HTTPS 来源，生产必须配置，用于安全 Cookie 与来源校验 |

@@ -7,9 +7,9 @@ func TestRunTimeBudget(t *testing.T) {
 		name, value string
 		want        int
 	}{
-		{"default twenty minutes", "", 1200},
-		{"invalid value uses default", "invalid", 1200},
-		{"nonpositive value uses default", "0", 1200},
+		{"default one hour", "", 3600},
+		{"invalid value uses default", "invalid", 3600},
+		{"nonpositive value uses default", "0", 3600},
 		{"explicit override", "1800", 1800},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
