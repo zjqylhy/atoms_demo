@@ -1066,7 +1066,7 @@ export default function App() {
             </div>
             {project.source?.kind==='fallback' ? <FallbackNotice origin={fallback.candidate ? undefined : fallback.origin} onReturn={id=>void open(id)}/> : project.source && <div className="source-banner">预置示例副本 · 可交互、可保存，可继续提出修改要求</div>}
             {fallback.phase && <div className="source-banner fallback-loading" role="status">正在打开演示应用…<button onClick={()=>{fallback.cancel();setPane('chat');}}>留在原任务</button></div>}
-            {project.recovery && <div className="source-banner">{project.recovery.unavailable ? '演示副本已删除，原任务与成果仍保留。' : '演示应用已就绪，原需求尚未完成。'}<button disabled={project.recovery.unavailable || !!fallback.phase} onClick={()=>void fallback.openDemo(project)}>{project.recovery.unavailable ? '副本已删除' : '打开演示应用'}</button></div>}
+            {project.recovery && !project.recovery.unavailable && <div className="source-banner">演示应用已就绪，原需求尚未完成。<button disabled={!!fallback.phase} onClick={()=>void fallback.openDemo(project)}>打开演示应用</button></div>}
             {task?.status==='failed' && project.head && <div className="source-banner">本次修改未完成，之前的成功版本和应用数据已保留。<button onClick={()=>{setVersion(project.head!);setPath('index.html');setPane('work');setTab('preview');}}>查看上一可用版本</button></div>}
             <div className={"workspace show-" + pane} inert={!!fallback.phase}>
               <section className="conversation">
