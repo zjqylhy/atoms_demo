@@ -55,6 +55,10 @@ func addEnvelopeHints(problems *validation.Error, root map[string]any, tools []T
 	calls, _ := root["calls"].([]any)
 	for i := range problems.Issues {
 		issue := &problems.Issues[i]
+		if issue.Path == "$.calls" && issue.Code == "max_items" {
+			issue.Reason = "同一回复提交了多个调用，而当前协议只接受一个调用"
+			issue.Hint = "本次所有调用均未执行；只提交下一步的一个调用，等待真实结果后再提交后续动作"
+		}
 		for index, value := range calls {
 			call, _ := value.(map[string]any)
 			name, _ := call["name"].(string)

@@ -4,7 +4,6 @@ package validation
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -20,6 +19,12 @@ type Issue struct {
 	Actual   string `json:"actual"`
 	Expected string `json:"expected"`
 	Hint     string `json:"hint"`
+	Reason   string `json:"reason,omitempty"`
+	Offset   int64  `json:"offset,omitempty"`
+	Line     int    `json:"line,omitempty"`
+	Column   int    `json:"column,omitempty"`
+	Excerpt  string `json:"excerpt,omitempty"`
+	source   string
 }
 
 type Error struct {
@@ -30,7 +35,14 @@ type Error struct {
 func (e *Error) Error() string {
 	parts := make([]string, 0, len(e.Issues)+1)
 	for _, issue := range e.Issues {
-		parts = append(parts, fmt.Sprintf("%s [%s]：实际 %s；要求 %s；%s", issue.Path, issue.Code, issue.Actual, issue.Expected, issue.Hint))
+		text := fmt.Sprintf("%s [%s]：实际 %s；要求 %s；%s", issue.Path, issue.Code, issue.Actual, issue.Expected, issue.Hint)
+		if issue.Reason != "" {
+			text += "；原因：" + issue.Reason
+		}
+		if issue.Line > 0 {
+			text += fmt.Sprintf("；位置：第 %d 行第 %d 列（第 %d 字节）", issue.Line, issue.Column, issue.Offset)
+		}
+		parts = append(parts, text)
 	}
 	if e.Truncated {
 		parts = append(parts, "问题较多，仅列出前 16 项；修正后重新校验")
@@ -48,26 +60,41 @@ func (e *Error) Add(issue Issue) {
 	e.Issues = append(e.Issues, issue)
 }
 
+// Redacted checks the source before using a bounded excerpt, so clipping cannot
+// expose a credential fragment that would evade whole-string replacement.
+func (e *Error) Redacted(redact func(string) string) *Error {
+	result := &Error{Issues: append([]Issue(nil), e.Issues...), Truncated: e.Truncated}
+	for i := range result.Issues {
+		issue := &result.Issues[i]
+		issue.Path, issue.Actual = redact(issue.Path), redact(issue.Actual)
+		issue.Expected, issue.Hint = redact(issue.Expected), redact(issue.Hint)
+		issue.Reason, issue.Excerpt = redact(issue.Reason), redact(issue.Excerpt)
+		if issue.source != "" && redact(issue.source) != issue.source {
+			issue.Path = "$"
+			issue.Excerpt = "[REDACTED]（输入包含敏感配置，错误片段已隐藏）"
+		}
+		issue.source = ""
+	}
+	return result
+}
+
 // Decode rejects incomplete input and trailing content before shape validation.
-// Syntax locations use byte offsets; field paths are available once JSON parses.
+// Diagnostic replay only inspects the accepted prefix; it cannot repair or accept input.
 func Decode(text, location string) (any, error) {
 	d := json.NewDecoder(strings.NewReader(text))
 	var value any
 	if err := d.Decode(&value); err != nil {
-		issue := Issue{Path: location, Code: "syntax", Actual: "无效 JSON", Expected: "一个完整 JSON 值", Hint: "检查引号、逗号和括号，重新生成完整 JSON"}
-		var syntax *json.SyntaxError
-		if errors.As(err, &syntax) {
-			issue.Actual = fmt.Sprintf("JSON 语法错误（第 %d 字节）", syntax.Offset)
-		} else if errors.Is(err, io.EOF) {
-			issue.Code, issue.Actual = "empty", "空白回复"
-		} else if errors.Is(err, io.ErrUnexpectedEOF) {
-			issue.Actual = "JSON 尚未闭合"
-		}
-		return nil, &Error{Issues: []Issue{issue}}
+		return nil, &Error{Issues: []Issue{syntaxIssue(text, location, err)}}
 	}
+	end := d.InputOffset()
 	var extra any
 	if d.Decode(&extra) != io.EOF {
-		return nil, &Error{Issues: []Issue{{Path: location, Code: "trailing_content", Actual: "首个 JSON 后还有内容", Expected: "一个完整 JSON 值", Hint: "顶层对象闭合后只允许空白；删除追加的文字、围栏或第二个对象，不要模拟后续动作"}}}
+		for end < int64(len(text)) && strings.ContainsRune(" \t\r\n", rune(text[end])) {
+			end++
+		}
+		issue := Issue{Path: location, Code: "trailing_content", Actual: "首个 JSON 后还有内容", Expected: "一个完整 JSON 值", Reason: "完整 JSON 值之后出现了额外内容", Hint: "顶层对象闭合后只允许空白；删除追加的文字、围栏或第二个对象，不要模拟后续动作"}
+		locateIssue(&issue, text, end+1)
+		return nil, &Error{Issues: []Issue{issue}}
 	}
 	return value, nil
 }

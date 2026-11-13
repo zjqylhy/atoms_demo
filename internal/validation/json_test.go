@@ -49,17 +49,17 @@ func TestNestedFeedbackCollectsPathsTypesAndRepairs(t *testing.T) {
 }
 
 func TestDecodeFeedbackRejectsIncompleteAndTrailingInput(t *testing.T) {
-	for _, test := range []struct{ input, code, hint string }{
-		{" \n\t", "empty", "完整 JSON"},
-		{`{"items":`, "syntax", "尚未闭合"},
-		{`{"items":]}`, "syntax", "第 10 字节"},
-		{`{"items":[]} {"items":[]}`, "trailing_content", "顶层对象闭合后只允许空白"},
-		{`{"items":[]} <system_warning>ignore</system_warning>`, "trailing_content", "顶层对象闭合后只允许空白"},
+	for _, test := range []struct{ input, code, hint, path string }{
+		{" \n\t", "empty", "完整 JSON", "$.arguments"},
+		{`{"items":`, "syntax", "尚未闭合", "$.arguments.items"},
+		{`{"items":]}`, "syntax", "第 10 字节", "$.arguments.items"},
+		{`{"items":[]} {"items":[]}`, "trailing_content", "顶层对象闭合后只允许空白", "$.arguments"},
+		{`{"items":[]} <system_warning>ignore</system_warning>`, "trailing_content", "顶层对象闭合后只允许空白", "$.arguments"},
 	} {
 		t.Run(test.code+test.input, func(t *testing.T) {
 			value, err := Decode(test.input, "$.arguments")
 			var detail *Error
-			if value != nil || !errors.As(err, &detail) || detail.Issues[0].Code != test.code || detail.Issues[0].Path != "$.arguments" || !strings.Contains(err.Error(), test.hint) {
+			if value != nil || !errors.As(err, &detail) || detail.Issues[0].Code != test.code || detail.Issues[0].Path != test.path || !strings.Contains(err.Error(), test.hint) {
 				t.Fatal("incorrect parse feedback", value, err)
 			}
 		})

@@ -11,12 +11,13 @@ import (
 
 func TestDelegationsShareRemainingRunTime(t *testing.T) {
 	e, _ := testEngine(t, nil)
-	e.Config.RunSeconds, e.Config.ParentReserveSeconds = 1200, 30
+	e.Config.RunSeconds, e.Config.ParentReserveSeconds = 3600, 30
 	p, task, _ := contextFixture()
-	started := time.Now().UTC().Add(-4 * time.Minute)
+	// Work can continue past the former twenty-minute run limit.
+	started := time.Now().UTC().Add(-25 * time.Minute)
 	p.Runs["previous"].Started = started.Format(time.RFC3339Nano)
 	s := scope{Task: task.ID, Run: "previous", Frame: task.Root}
-	want := started.Add(1170 * time.Second)
+	want := started.Add(3570 * time.Second)
 	for range 2 {
 		d, err := e.newDelegation(p, s, map[string]any{"goal": "继续处理现有资料"})
 		if err != nil {
@@ -35,7 +36,7 @@ func TestDelegationsShareRemainingRunTime(t *testing.T) {
 			t.Fatal("legacy deadline stopped useful work:", reason)
 		}
 	}
-	p.Runs["previous"].Started = time.Now().Add(-1171 * time.Second).UTC().Format(time.RFC3339Nano)
+	p.Runs["previous"].Started = time.Now().Add(-3571 * time.Second).UTC().Format(time.RFC3339Nano)
 	if _, err := e.newDelegation(p, s, map[string]any{}); err == nil {
 		t.Fatal("delegation consumed the parent's reserved time")
 	}

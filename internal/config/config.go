@@ -63,7 +63,7 @@ func Load() Config {
 		MaxCalls:             number("ATOMS_MAX_CALLS", 24),
 		MaxTools:             number("ATOMS_MAX_TOOLS", 64),
 		MaxConcurrent:        number("ATOMS_MAX_CONCURRENT", 2),
-		RunSeconds:           number("ATOMS_RUN_SECONDS", 1200),
+		RunSeconds:           number("ATOMS_RUN_SECONDS", 3600),
 		DailyCalls:           number("ATOMS_DAILY_CALLS", 2000),
 		WorkspaceDailyCalls:  number("ATOMS_WORKSPACE_DAILY_CALLS", 1000),
 		MaxOutputTokens:      number("ATOMS_MAX_OUTPUT_TOKENS", 4096),

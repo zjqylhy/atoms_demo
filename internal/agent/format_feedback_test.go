@@ -9,6 +9,7 @@ import (
 	"mockatoms/internal/validation"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -200,7 +201,7 @@ func TestNativeMalformedArgumentsReceiveToolFeedback(t *testing.T) {
 				n := requests.Add(1)
 				name, args := "list_files", `{broken`
 				if n == 2 {
-					for _, want := range []string{"$.arguments", "syntax", "validation", "JSON 语法错误", "检查引号、逗号和括号"} {
+					for _, want := range []string{"$.arguments", "syntax", "validation", "JSON 语法错误", "检查引号、逗号和括号", "reason", "offset", "line", "column", "excerpt", "⟦b⟧"} {
 						if !strings.Contains(string(wire), want) {
 							t.Errorf("native syntax feedback omitted %q", want)
 						}
@@ -236,6 +237,100 @@ func TestNativeMalformedArgumentsReceiveToolFeedback(t *testing.T) {
 				if calls, _ := pendingCalls(frame.Messages); len(calls) != 0 {
 					t.Fatal("invalid native call left unclosed")
 				}
+			}
+		})
+	}
+}
+
+func TestOriginalSyntaxDiagnosticsReachActualRetryRequests(t *testing.T) {
+	raw, err := os.ReadFile("../validation/testdata/calculator_format_errors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []struct {
+		Name   string `json:"name"`
+		Input  string `json:"input"`
+		Path   string `json:"path"`
+		Offset int64  `json:"offset"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(raw, &fixtures); err != nil || len(fixtures) != 6 {
+		t.Fatal("missing original failures", err)
+	}
+	for _, fixture := range fixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			e, p := testEngine(t, nil)
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				n := requests.Add(1)
+				if n == 1 {
+					writeDialogueReply(w, fixture.Input)
+					return
+				}
+				if n != 2 {
+					t.Error("unexpected additional retry")
+				}
+				var request struct {
+					Messages []struct{ Role, Content string } `json:"messages"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					t.Error(err)
+				}
+				found := false
+				for _, message := range request.Messages {
+					if !strings.HasPrefix(message.Content, formatFeedbackPrefix) {
+						continue
+					}
+					var feedback struct {
+						OK         bool
+						Validation *validation.Error
+					}
+					decoder := json.NewDecoder(strings.NewReader(strings.TrimPrefix(message.Content, formatFeedbackPrefix)))
+					if err := decoder.Decode(&feedback); err != nil || feedback.Validation == nil || len(feedback.Validation.Issues) != 1 {
+						t.Error("retry lost structured diagnostics", err)
+						continue
+					}
+					i := feedback.Validation.Issues[0]
+					found = !feedback.OK && i.Path == fixture.Path && i.Offset == fixture.Offset && strings.Contains(i.Reason, fixture.Reason) && i.Line > 0 && i.Column > 0 && strings.Contains(i.Excerpt, "⟦")
+				}
+				if !found {
+					t.Error("actual next HTTP request omitted the specific syntax diagnosis")
+				}
+				// This is a transport/feedback test, not a claim that a real model
+				// repaired the calculator. A valid answer closes the inspection run.
+				writeDialogueReply(w, `{"calls":[{"name":"finish_task","arguments":{"summary":"反馈已收到","answer_only":true}}]}`)
+			}))
+			defer server.Close()
+			e.Config.BaseURL, e.Config.APIKey, e.Config.Model = server.URL, "test-key", "test"
+			e.Config.ToolMode, e.Config.Protocol = "json", "chat_completions"
+			e.Model = model.New(e.Config)
+			started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "检查错误反馈后回答结果，不修改产物", "build", "start", "submit", "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.ActiveRun == "" })
+			run := p.Runs[started.ActiveRun]
+			if run.Status != "completed" || run.Calls != 2 || run.FormatRepairs != 1 || run.Tools != 1 || len(p.Files) != 0 || p.Tasks[p.CurrentTask].Plan != nil {
+				t.Fatal("invalid reply executed or retry semantics changed", core.JSON(run))
+			}
+		})
+	}
+}
+
+func TestSyntaxExcerptsRedactBeforeClippingAndJSONEncoding(t *testing.T) {
+	for _, secret := range []string{"sensitive-api-key", strings.Repeat("private-key-fragment-", 15), "key-with-\"quote\\slash"} {
+		t.Run(fmt.Sprint(len(secret)), func(t *testing.T) {
+			e, _ := testEngine(t, nil)
+			e.Config.APIKey = secret
+			input := `{"secret":` + core.JSON(secret) + `]}`
+			_, failure := validation.Decode(input, "$.arguments")
+			feedback := e.failureFeedback(fmt.Errorf("解析未执行：%w", failure))
+			encoded := core.JSON(feedback)
+			if !json.Valid([]byte(encoded)) || strings.Contains(encoded, secret) || strings.Contains(encoded, "private-key-fragment") || strings.Contains(encoded, "key-with-") || !strings.Contains(encoded, "[REDACTED]") {
+				t.Fatal("syntax excerpt exposed a full or clipped credential", encoded)
+			}
+			if !strings.Contains(encoded, "offset") || !strings.Contains(encoded, "对象尚未关闭") {
+				t.Fatal("redaction lost non-sensitive diagnostics", encoded)
 			}
 		})
 	}
