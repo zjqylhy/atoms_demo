@@ -39,7 +39,7 @@ flowchart TD
     H --> O[新增 分享及单文件 HTML 导出]
 ```
 
-交互总览图在本文配套 `.archify` 目录生成；各分支细节以下文为准。图的校验结果只证明图可读和结构有效，不代表产品功能已通过验收。
+[交互总览图](../.archify/workflow-acceptance-completion-20261113-184458/acceptance-completion.html)及[图的 JSON 规格](../.archify/workflow-acceptance-completion-20261113-184458/candidate.json)展示相同方案；各分支细节以下文为准。[方案检查记录](acceptance-completion-review.md)仅记录文档和图的检查，不代表产品功能已通过验收。
 
 ## 3 新增实体及用途
 

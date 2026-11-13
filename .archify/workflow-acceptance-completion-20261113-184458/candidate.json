@@ -1,0 +1,607 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "验收补齐方案 待确认",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": ".archify/workflow-acceptance-completion-20261113-184458/acceptance-completion.html",
+    "repository": {
+      "url": "https://github.com/zjqylhy/atoms_demo.git",
+      "revision": "383cb3610fee19ce9ad3354a6c327b4517cda0bc",
+      "link_mode": "local-only"
+    }
+  },
+  "lanes": [
+    {
+      "id": "entry",
+      "label": "进入与身份"
+    },
+    {
+      "id": "examples",
+      "label": "预置成果"
+    },
+    {
+      "id": "generation",
+      "label": "真实生成"
+    },
+    {
+      "id": "fallback",
+      "label": "停止与降级"
+    },
+    {
+      "id": "data",
+      "label": "使用与持久化"
+    },
+    {
+      "id": "delivery",
+      "label": "反馈与交付"
+    }
+  ],
+  "mainPath": [
+    "open",
+    "identity",
+    "workspace",
+    "request",
+    "gate",
+    "model",
+    "verified",
+    "preview"
+  ],
+  "nodes": [
+    {
+      "id": "open",
+      "lane": "entry",
+      "col": 0,
+      "type": "frontend",
+      "label": "打开工作台",
+      "sublabel": "输入需求或体验示例",
+      "tag": "已有",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 18,
+          "end_line": 40,
+          "label": "待确认的设计"
+        }
+      ],
+      "yOffset": -52
+    },
+    {
+      "id": "identity",
+      "lane": "entry",
+      "col": 0,
+      "type": "security",
+      "label": "账号与游客",
+      "sublabel": "注册登录和换设备恢复",
+      "tag": "新增",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 64,
+          "end_line": 95,
+          "label": "待确认的设计"
+        }
+      ],
+      "yOffset": 52
+    },
+    {
+      "id": "workspace",
+      "lane": "entry",
+      "col": 1,
+      "type": "backend",
+      "label": "个人项目",
+      "sublabel": "旧项目与调用账本保留",
+      "tag": "修改",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 87,
+          "end_line": 95,
+          "label": "待确认的设计"
+        }
+      ],
+      "yOffset": 52
+    },
+    {
+      "id": "request",
+      "lane": "entry",
+      "col": 2,
+      "type": "frontend",
+      "label": "提交自由需求",
+      "sublabel": "继续支持 Build 与 Plan",
+      "tag": "已有",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 22,
+          "end_line": 37,
+          "label": "待确认的设计"
+        }
+      ],
+      "yOffset": 52
+    },
+    {
+      "id": "catalog",
+      "lane": "examples",
+      "col": 0,
+      "type": "frontend",
+      "label": "公共成果广场",
+      "sublabel": "三个成品 无需模型",
+      "tag": "新增",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 150,
+          "end_line": 156,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "copy",
+      "lane": "examples",
+      "col": 1,
+      "type": "backend",
+      "label": "复制个人示例",
+      "sublabel": "独立文件和初始数据",
+      "tag": "新增",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 150,
+          "end_line": 156,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "lane": "generation",
+      "col": 2,
+      "type": "security",
+      "label": "执行条件",
+      "sublabel": "Build 或计划已批准",
+      "tag": "保留",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 158,
+          "end_line": 184,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "model",
+      "lane": "generation",
+      "col": 3,
+      "type": "backend",
+      "label": "模型生成与恢复",
+      "sublabel": "有界重试及配置的备用",
+      "tag": "修改",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 178,
+          "end_line": 184,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "verified",
+      "lane": "generation",
+      "col": 4,
+      "type": "backend",
+      "label": "运行与验收",
+      "sublabel": "通过后形成成功版本",
+      "tag": "保留",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 22,
+          "end_line": 37,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "waiting",
+      "lane": "fallback",
+      "col": 2,
+      "type": "security",
+      "label": "保留进度并等待",
+      "sublabel": "停止或计划未批准",
+      "tag": "保留",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 158,
+          "end_line": 184,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "fallback",
+      "lane": "fallback",
+      "col": 3,
+      "type": "backend",
+      "label": "模板降级",
+      "sublabel": "保留原任务和原文件",
+      "tag": "新增",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 178,
+          "end_line": 186,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "demo",
+      "lane": "fallback",
+      "col": 4,
+      "type": "frontend",
+      "label": "演示副本就绪",
+      "sublabel": "明确原需求尚未完成",
+      "tag": "新增",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 184,
+          "end_line": 186,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "preview",
+      "lane": "data",
+      "col": 4,
+      "type": "frontend",
+      "label": "隔离交互预览",
+      "sublabel": "正式与试用数据区分",
+      "tag": "修改",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 109,
+          "end_line": 146,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "lane": "data",
+      "col": 3,
+      "type": "backend",
+      "label": "受控保存接口",
+      "sublabel": "会话 项目 版本 修订",
+      "tag": "新增",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 109,
+          "end_line": 133,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "database",
+      "lane": "data",
+      "col": 2,
+      "type": "database",
+      "label": "SQLite 事务",
+      "sublabel": "业务状态与保存回执",
+      "tag": "新增",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 99,
+          "end_line": 107,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "saved",
+      "lane": "data",
+      "col": 1,
+      "type": "frontend",
+      "label": "确认已保存",
+      "sublabel": "收到提交成功再展示",
+      "tag": "新增",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 115,
+          "end_line": 129,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "recover",
+      "lane": "data",
+      "col": 0,
+      "type": "backend",
+      "label": "刷新重启后恢复",
+      "sublabel": "从数据库读取已存状态",
+      "tag": "新增",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 115,
+          "end_line": 129,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "unsaved",
+      "lane": "delivery",
+      "col": 2,
+      "type": "security",
+      "label": "未保存或冲突",
+      "sublabel": "保留编辑并明确提示",
+      "tag": "新增",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 103,
+          "end_line": 107,
+          "label": "待确认的设计"
+        }
+      ]
+    },
+    {
+      "id": "sharing",
+      "lane": "delivery",
+      "col": 4,
+      "type": "frontend",
+      "label": "分享与导出",
+      "sublabel": "可撤销链接及离线 HTML",
+      "tag": "新增",
+      "width": 158,
+      "sources": [
+        {
+          "path": "docs/acceptance-completion-design.md",
+          "line": 188,
+          "end_line": 204,
+          "label": "待确认的设计"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "open",
+      "to": "identity",
+      "label": "建立会话",
+      "role": "main",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight"
+    },
+    {
+      "id": "e2",
+      "from": "identity",
+      "to": "workspace",
+      "label": "确认归属",
+      "role": "main",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left",
+      "route": "straight"
+    },
+    {
+      "id": "e3",
+      "from": "workspace",
+      "to": "request",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e4",
+      "from": "open",
+      "to": "catalog",
+      "label": "查看示例",
+      "role": "branch",
+      "variant": "default"
+    },
+    {
+      "id": "e5",
+      "from": "catalog",
+      "to": "copy",
+      "label": "开始试用",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e6",
+      "from": "copy",
+      "to": "workspace",
+      "label": "保存副本",
+      "role": "return",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "route": "straight"
+    },
+    {
+      "id": "e7",
+      "from": "request",
+      "to": "gate",
+      "role": "main",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight"
+    },
+    {
+      "id": "e8",
+      "from": "gate",
+      "to": "model",
+      "label": "允许执行",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e9",
+      "from": "gate",
+      "to": "waiting",
+      "label": "停止或待批准",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "e10",
+      "from": "model",
+      "to": "verified",
+      "label": "生成成功",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e11",
+      "from": "model",
+      "to": "fallback",
+      "label": "故障恢复耗尽",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "e12",
+      "from": "fallback",
+      "to": "demo",
+      "label": "独立副本",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e13",
+      "from": "demo",
+      "to": "preview",
+      "label": "演示模式",
+      "role": "branch",
+      "variant": "default"
+    },
+    {
+      "id": "e14",
+      "from": "verified",
+      "to": "preview",
+      "label": "成功版本",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e15",
+      "from": "preview",
+      "to": "api",
+      "label": "宿主转交",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e16",
+      "from": "api",
+      "to": "database",
+      "label": "校验通过",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e17",
+      "from": "api",
+      "to": "unsaved",
+      "label": "拒绝或冲突",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "e18",
+      "from": "database",
+      "to": "saved",
+      "label": "提交成功",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e19",
+      "from": "database",
+      "to": "unsaved",
+      "label": "写入失败",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "e20",
+      "from": "saved",
+      "to": "recover",
+      "role": "main",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e21",
+      "from": "preview",
+      "to": "sharing",
+      "label": "选定成功版本",
+      "role": "branch",
+      "variant": "default"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "保存承诺",
+      "items": [
+        "业务数据由服务端保存",
+        "收到事务提交确认才显示已保存",
+        "刷新与进程重启读取同一数据"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "演示边界",
+      "items": [
+        "模板来源明确展示",
+        "原需求未完成 不冒充模型成功",
+        "不覆盖原项目文件或业务数据"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "评审状态",
+      "items": [
+        "本图描述拟实现方案",
+        "新增与修改节点均已标注",
+        "方案确认后编码 功能尚未验收"
+      ]
+    }
+  ]
+}
