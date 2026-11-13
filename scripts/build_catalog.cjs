@@ -9,7 +9,7 @@ const definitions=[
   {id:'calculator',title:'复利计算器',description:'调整本金、利率和年数，保存并比较计算方案。',initial:{items:[]}}
 ];
 (async()=>{
-  const sdk=await fs.readFile(path.join(root,'internal/appruntime/runtime.js'),'utf8');
+  const sdk=(await fs.readFile(path.join(root,'internal/appruntime/runtime.js'),'utf8')).replace(/\r\n/g,'\n');
   for(const definition of definitions){
     const files={'atoms-runtime.js':sdk,'atoms.app.json':JSON.stringify({api_version:1,schema_version:1,initial_state:definition.initial})};
     for(const name of ['index.html','app.js','style.css'])files[name]=(await fs.readFile(path.join(root,'internal/catalog/source',name),'utf8')).replace('TEMPLATE_KIND',definition.id);

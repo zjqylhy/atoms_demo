@@ -7,7 +7,10 @@ import (
 )
 
 //go:embed runtime.js
-var SDK string
+var sourceSDK string
+
+// The runtime's content identity is independent of a Windows checkout's EOLs.
+var SDK = strings.ReplaceAll(sourceSDK, "\r\n", "\n")
 
 //go:embed offline.js
 var offline string
