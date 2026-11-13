@@ -9,6 +9,42 @@ import (
 	"time"
 )
 
+func TestDelegationsShareRemainingRunTime(t *testing.T) {
+	e, _ := testEngine(t, nil)
+	e.Config.RunSeconds, e.Config.ParentReserveSeconds = 1200, 30
+	p, task, _ := contextFixture()
+	started := time.Now().UTC().Add(-4 * time.Minute)
+	p.Runs["previous"].Started = started.Format(time.RFC3339Nano)
+	s := scope{Task: task.ID, Run: "previous", Frame: task.Root}
+	want := started.Add(1170 * time.Second)
+	for range 2 {
+		d, err := e.newDelegation(p, s, map[string]any{"goal": "继续处理现有资料"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		deadline, err := time.Parse(time.RFC3339Nano, d.Deadline)
+		if err != nil || !deadline.Equal(want) || time.Until(deadline) <= 180*time.Second {
+			t.Fatalf("delegation did not receive the remaining run time: %s, %v", d.Deadline, err)
+		}
+		// Stored legacy deadlines must not shorten the current run's budget.
+		d.Deadline = time.Now().Add(-time.Second).UTC().Format(time.RFC3339Nano)
+		task.Frames["child"] = &core.Frame{ID: "child", Role: "Alex", Delegation: d}
+		child := s
+		child.Frame = "child"
+		if reason := e.delegationBoundary(p, child, false); reason != "" {
+			t.Fatal("legacy deadline stopped useful work:", reason)
+		}
+	}
+	p.Runs["previous"].Started = time.Now().Add(-1171 * time.Second).UTC().Format(time.RFC3339Nano)
+	if _, err := e.newDelegation(p, s, map[string]any{}); err == nil {
+		t.Fatal("delegation consumed the parent's reserved time")
+	}
+	s.Frame = "child"
+	if reason := e.delegationBoundary(p, s, false); reason != "保留主 Agent 的收尾时间" {
+		t.Fatal("active delegation did not preserve the parent's reserved time:", reason)
+	}
+}
+
 func TestDelegationReturnsBeforeParentBudgetExhaustion(t *testing.T) {
 	for _, role := range []string{"Emma", "Bob", "Alex", "David"} {
 		for _, mode := range []string{"calls", "format", "time", "explicit"} {
@@ -36,8 +72,7 @@ func TestDelegationReturnsBeforeParentBudgetExhaustion(t *testing.T) {
 				})
 				e, p := testEngine(t, g)
 				e.Config.DelegateCalls = 3
-				e.Config.DelegateSeconds = 1
-				e.Config.RunSeconds = 8
+				e.Config.RunSeconds = 4
 				e.Config.ParentReserveSeconds = 2
 				started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "核对资料", "build", "start", "submit", "")
 				if err != nil {
@@ -63,7 +98,7 @@ func TestDelegationReturnsBeforeParentBudgetExhaustion(t *testing.T) {
 					}
 				}
 				deadline, _ := time.Parse(time.RFC3339Nano, run.Started)
-				deadline = deadline.Add(8 * time.Second)
+				deadline = deadline.Add(time.Duration(e.Config.RunSeconds) * time.Second)
 				if time.Until(deadline) < time.Second {
 					t.Fatal("parent time reserve unavailable")
 				}

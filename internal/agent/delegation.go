@@ -26,15 +26,15 @@ func (e *Engine) runDeadline(p *core.Project, s scope) time.Time {
 	return start.Add(time.Duration(e.Config.RunSeconds) * time.Second)
 }
 
+func (e *Engine) delegationDeadline(p *core.Project, s scope) time.Time {
+	return e.runDeadline(p, s).Add(-time.Duration(e.parentSeconds()) * time.Second)
+}
+
 func (e *Engine) newDelegation(p *core.Project, s scope, a map[string]any) (*core.Delegation, error) {
 	remaining := e.Config.MaxCalls - p.Runs[s.Run].Calls - e.parentCalls()
-	parentDeadline := e.runDeadline(p, s).Add(-time.Duration(e.parentSeconds()) * time.Second)
-	if remaining < 1 || time.Until(parentDeadline) <= 0 {
+	deadline := e.delegationDeadline(p, s)
+	if remaining < 1 || time.Until(deadline) <= 0 {
 		return nil, errors.New("剩余预算不足以分派并保留主 Agent 收尾预算")
-	}
-	deadline := time.Now().Add(time.Duration(positive(e.Config.DelegateSeconds, 180)) * time.Second)
-	if parentDeadline.Before(deadline) {
-		deadline = parentDeadline
 	}
 	constraints := []string{p.Tasks[s.Task].Goal}
 	for _, r := range taskRequirements(p, p.Tasks[s.Task]) {
@@ -64,9 +64,8 @@ func (e *Engine) delegationBoundary(p *core.Project, s scope, pending bool) stri
 	if d.RunID != s.Run {
 		return "上次委派运行已结束，先交回主 Agent 核对进度"
 	}
-	deadline, _ := time.Parse(time.RFC3339Nano, d.Deadline)
-	if !deadline.IsZero() && !time.Now().Before(deadline) {
-		return "委派时间预算已用完"
+	if !time.Now().Before(e.delegationDeadline(p, s)) {
+		return "保留主 Agent 的收尾时间"
 	}
 	if e.Config.MaxTools > 0 && p.Runs[s.Run].Tools >= e.Config.MaxTools-2 {
 		return "保留主 Agent 的工具收尾预算"
@@ -132,15 +131,6 @@ func closeUnstarted(p *core.Project, s scope, calls []core.Call, reason string) 
 	}
 }
 
-func (e *Engine) modelContext(ctx context.Context, f *core.Frame) (context.Context, context.CancelFunc) {
-	if f.Delegation != nil {
-		if deadline, err := time.Parse(time.RFC3339Nano, f.Delegation.Deadline); err == nil {
-			return context.WithDeadline(ctx, deadline)
-		}
-	}
-	return context.WithCancel(ctx)
-}
-
 func (e *Engine) delegate(ctx context.Context, s scope, c core.Call, a map[string]any, p *core.Project) (string, error) {
 	role := str(a, "role")
 	t := p.Tasks[s.Task]
@@ -160,17 +150,11 @@ func (e *Engine) delegate(ctx context.Context, s scope, c core.Call, a map[strin
 					return err
 				}
 				old.Delegation = d
-			} else if d := old.Delegation; d.RunID != s.Run {
-				// Resume the unused portion of the original contract, never reset it.
-				deadline, _ := time.Parse(time.RFC3339Nano, d.Deadline)
-				ended, _ := time.Parse(time.RFC3339Nano, p.Runs[d.RunID].Ended)
-				remaining := max(time.Duration(0), deadline.Sub(ended))
-				next := time.Now().Add(remaining)
-				parent := e.runDeadline(p, s).Add(-time.Duration(e.parentSeconds()) * time.Second)
-				if parent.Before(next) {
-					next = parent
-				}
-				d.Deadline = next.UTC().Format(time.RFC3339Nano)
+			} else {
+				// Reuse the run's deadline, including for saved legacy delegations.
+				// Calls and work history remain spent across a resume.
+				d := old.Delegation
+				d.Deadline = e.delegationDeadline(p, s).UTC().Format(time.RFC3339Nano)
 				d.RunID = s.Run
 			}
 		}
@@ -195,7 +179,7 @@ func (e *Engine) delegate(ctx context.Context, s scope, c core.Call, a map[strin
 	}
 	child := s
 	child.Frame = childID
-	childCtx, cancel := context.WithDeadline(ctx, e.runDeadline(p, s).Add(-time.Duration(e.parentSeconds())*time.Second))
+	childCtx, cancel := context.WithDeadline(ctx, e.delegationDeadline(p, s))
 	defer cancel()
 	result, err := e.runFrame(childCtx, child)
 	redirected := errors.Is(err, errNewInstruction)
@@ -224,10 +208,4 @@ func (e *Engine) delegate(ctx context.Context, s scope, c core.Call, a map[strin
 		}
 		return map[string]any{"role": role, "summary": result, "outcome": p.Tasks[s.Task].Frames[childID].Outcome, "files": p.Files}, nil
 	})
-}
-
-func (e *Engine) waitForModel(ctx context.Context, f *core.Frame, wait time.Duration) error {
-	bounded, cancel := e.modelContext(ctx, f)
-	defer cancel()
-	return waitForRetry(bounded, wait)
 }

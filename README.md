@@ -43,6 +43,7 @@ go run ./cmd/server
 | `ATOMS_LLM_TOOL_MODE` | `native` 或 `json`；JSON 适配仅支持 Chat Completions |
 | `ATOMS_MAX_OUTPUT_TOKENS / LLM_TPM` | 输出上限和每分钟预留额度；示例沿用现有网关的 81,920 / 1,000,000，需按实际模型能力与预算配置 |
 | `ATOMS_BACKUP_LLM_BASE_URL / MODEL / API_KEY` | 可选单一备用，沿用主通道协议和额度 |
+| `ATOMS_RUN_SECONDS` | 整轮总时限，默认 1200 秒（20 分钟）；委派共用剩余时间，默认给主 Agent 预留 30 秒收尾 |
 | `ATOMS_RUNNER_URL / RUNNER_TOKEN` | 独立执行器地址及共享随机凭据，至少 24 字符 |
 | `ATOMS_DATA_DIR / WEB_DIR / ADDR` | 数据目录、前端构建目录、监听地址 |
 | `ATOMS_PUBLIC_URL` | 公网 HTTPS 来源，生产必须配置，用于安全 Cookie 与来源校验 |
@@ -50,6 +51,8 @@ go run ./cmd/server
 | `ATOMS_TRUSTED_PROXY_IPS` | 容器代理的精确 IP，逗号分隔；只接受这些来源的最后一跳 X-Forwarded-For。代理 IP 变化时需同步配置，未匹配时按直连来源限流 |
 
 普通 429、网络错误、502/503/504 最多重试 3 次；TPM 沿用最多 2 次等待，二者共享当前动作恢复计数。401/403 和预算不足不原样重试。备用、超时和结果未知的调用都占用原有额度，不将超时视为免费。HTTP 调用保留 300 秒上限，并受本轮剩余时间约束。
+
+委派不再设置独立的 180 秒上限，旧 `ATOMS_DELEGATE_SECONDS` 配置不再读取。每次委派默认仍最多调用模型 8 次（`ATOMS_DELEGATE_CALLS`）；主 Agent 默认预留 3 次调用和 30 秒（`ATOMS_PARENT_RESERVE_CALLS / ATOMS_PARENT_RESERVE_SECONDS`）。调用、工具或失败重试预算可能先于总时限耗尽。详见[整轮与委派时限](docs/run-time-budget.md)。
 
 公开部署需 Linux、Docker 和已配置的 `runsc`。构建固定执行镜像后启动私有执行器：
 
