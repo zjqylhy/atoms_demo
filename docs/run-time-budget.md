@@ -51,4 +51,6 @@ flowchart TD
 - 配置测试通过：默认、无效值和非正值均回落到 3600 秒，显式环境变量仍可覆盖。
 - 委派测试通过：将运行开始时间设为 25 分钟前，重复分派仍共享「开始后 59 分 30 秒」的截止时间；进入最后 30 秒后停止委派并交回主 Agent。
 - `go test ./... -count=1 -timeout 120s`、`go vet ./...`、`git diff --check` 通过。测试使用模拟模型和独立数据库，未执行真实 1 小时的模型任务。
-- 线上应用待当前活动运行结束后执行，配置生效结果另行记录。
+- 线上于 2026-11-14 04:24（北京时间）生效：当前任务结束、应用及执行器均空闲后，将 `/etc/atoms-lab/app.env` 的 `ATOMS_RUN_SECONDS` 从 1200 改为 3600，并重启 `atoms-web`。运行中的进程环境、本机及公网 `/api/bootstrap` 均确认 `run_seconds=3600`，健康检查通过。
+- 本次线上仅应用时限配置，沿用版本 `20261113T200035Z`；程序哈希与执行器进程保持不变，重启前后 11 个项目的完整状态一致。已保留环境文件备份 `/etc/atoms-lab/app.env.before-one-hour-20261113T202418Z` 和通过完整性检查的数据库备份 `/opt/atoms_lab/backups/20261113T202418865382Z.db`。
+- 本地应用凭据与公网验证结果分别保存在 `artifacts/run-time-budget-1h-20261114/applied.json`、`artifacts/run-time-budget-1h-20261114/public-verification.json`。没有为本次验证发起模型调用。
