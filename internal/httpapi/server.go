@@ -54,6 +54,7 @@ func New(s *store.Store, e *agent.Engine, c config.Config) http.Handler {
 	mux.HandleFunc("POST /api/projects", app.projects)
 	mux.HandleFunc("GET /api/projects/{id}", app.project)
 	mux.HandleFunc("PATCH /api/projects/{id}", app.project)
+	mux.HandleFunc("DELETE /api/projects/{id}", app.deleteProject)
 	mux.HandleFunc("POST /api/projects/{id}/actions", app.action)
 	mux.HandleFunc("POST /api/projects/{id}/inputs", app.input)
 	mux.HandleFunc("GET /api/projects/{id}/files", app.file)
@@ -93,6 +94,18 @@ func (s *Server) projectFailure(w http.ResponseWriter, err error) {
 		return
 	}
 	s.fail(w, 503, err)
+}
+func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.Engine.DeleteProject(sessionOf(r).TokenHash, id); err != nil {
+		if errors.Is(err, store.ErrProjectRunning) {
+			s.failCode(w, 409, "project_running", err.Error())
+		} else {
+			s.projectFailure(w, err)
+		}
+		return
+	}
+	send(w, 200, map[string]any{"deleted": true, "id": id})
 }
 func owner(r *http.Request) string { v, _ := r.Context().Value(ctxKey("owner")).(string); return v }
 func csrf(token string) string     { return core.Hash([]byte("atoms-csrf:" + token)) }

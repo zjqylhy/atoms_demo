@@ -15,9 +15,10 @@ type ProjectSource struct {
 	Version  int    `json:"version,omitempty"`
 }
 type DemoRecovery struct {
-	RunID     string `json:"run_id"`
-	ProjectID string `json:"project_id"`
-	Reason    string `json:"reason"`
+	Unavailable bool   `json:"unavailable,omitempty"`
+	RunID       string `json:"run_id"`
+	ProjectID   string `json:"project_id"`
+	Reason      string `json:"reason"`
 }
 
 // AppContract declares the format of business data, independently of code versions.

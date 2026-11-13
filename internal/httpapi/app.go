@@ -10,6 +10,9 @@ import (
 func (s *Server) appFailure(w http.ResponseWriter, err error) {
 	status := 400
 	switch {
+	case errors.Is(err, store.ErrCopyDeleted):
+		s.failCode(w, 410, "copy_deleted", err.Error())
+		return
 	case errors.Is(err, store.ErrSession):
 		status = 401
 	case errors.Is(err, core.ErrNotFound):

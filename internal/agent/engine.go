@@ -48,6 +48,20 @@ func (e *Engine) Shutdown() {
 	}
 }
 
+// Serialize deletion with admission and stop. Active entries remain present
+// until model/tool cleanup finishes, even after the persisted run is stopped.
+func (e *Engine) DeleteProject(sessionHash, id string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if _, err := e.Store.AccountSession(sessionHash); err != nil {
+		return err
+	}
+	if _, active := e.active[id]; active {
+		return store.ErrProjectRunning
+	}
+	return e.Store.DeleteProject(sessionHash, id)
+}
+
 // Start persists admission before launching execution independent of the HTTP request.
 func (e *Engine) Start(actor core.RunActor, owner, id, text, mode, requestID, action, decisionID string) (*core.Project, error) {
 	e.mu.Lock()

@@ -187,3 +187,35 @@ func TestAuthDatabaseFailureDoesNotFallBackToGuest(t *testing.T) {
 		}
 	}
 }
+
+func TestGlobalListDoesNotCountAgainstAnotherAccountAndDeleteHTTP(t *testing.T) {
+	f := newAuthFixture(t)
+	for i := 0; i < 31; i++ {
+		owner := "legacy-a"
+		if i == 30 {
+			owner = "legacy-b"
+		}
+		if _, err := f.store.Create(owner, "legacy"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, b := authClient(), authClient()
+	aCSRF, bCSRF := f.register(a, "alice"), f.register(b, "bob")
+	status, p := f.request(a, "POST", "/api/projects", aCSRF, `{"title":"new shared"}`)
+	if status != 201 {
+		t.Fatal(status, p)
+	}
+	base := "/api/projects/" + p["id"].(string)
+	if status, _ = f.request(b, "DELETE", base, "", `{}`); status != 403 {
+		t.Fatal("delete CSRF", status)
+	}
+	if status, out := f.request(b, "DELETE", base, bCSRF, `{}`); status != 200 || out["deleted"] != true {
+		t.Fatal(status, out)
+	}
+	if status, out := f.request(a, "GET", base, "", ""); status != 404 || out["code"] != "project_not_found" {
+		t.Fatal(status, out)
+	}
+	if status, _ = f.request(a, "DELETE", base, aCSRF, `{}`); status != 404 {
+		t.Fatal("repeat deletion", status)
+	}
+}

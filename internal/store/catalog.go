@@ -61,17 +61,8 @@ func (s *Store) CopyPreset(sessionHash, template, requestID string) (*core.Proje
 	if err != nil {
 		return nil, err
 	}
-	var data []byte
-	var priorTemplate string
-	err = tx.QueryRow(`SELECT p.state,c.source FROM project_copies c JOIN projects p ON p.id=c.project_id WHERE c.session_hash=? AND c.request_id=?`, sessionHash, requestID).Scan(&data, &priorTemplate)
-	if err == nil {
-		if priorTemplate != template {
-			return nil, errors.New("请求标识不能用于其他示例")
-		}
-		return decode(data)
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
+	if p, found, err := priorCopy(tx, sessionHash, requestID, template); err != nil || found {
+		return p, err
 	}
 	p, blobs, contract, err := b.Project(session.Workspace, "preset")
 	if err != nil {
@@ -122,7 +113,16 @@ func (s *Store) InstallFallback(owner, id, run, template, reason string) (*core.
 		// the visitor's edits or consuming another project slot.
 		p.Recovery.RunID = run
 		p.Recovery.Reason = reason
-		p.Message("assistant", "原需求仍未完成，之前的演示副本及其中数据已保留，可继续使用。", "fallback")
+		var count int
+		if err = tx.QueryRow(`SELECT COUNT(*) FROM projects WHERE id=?`, p.Recovery.ProjectID).Scan(&count); err != nil {
+			return nil, err
+		}
+		p.Recovery.Unavailable = p.Recovery.Unavailable || count == 0
+		if p.Recovery.Unavailable {
+			p.Message("assistant", "原需求仍未完成；之前的演示副本已删除，可从首页重新选择示例。", "fallback")
+		} else {
+			p.Message("assistant", "原需求仍未完成，之前的演示副本及其中数据已保留，可继续使用。", "fallback")
+		}
 		if _, err = tx.Exec(`UPDATE projects SET state=?,updated=? WHERE id=?`, []byte(core.JSON(p)), p.Updated, id); err != nil {
 			return nil, err
 		}

@@ -150,21 +150,12 @@ func (s *Store) CopyShare(sessionHash, token, requestID string) (*core.Project, 
 	if err != nil {
 		return nil, err
 	}
+	key := "share:" + core.Hash([]byte(token))
+	if p, found, err := priorCopy(tx, sessionHash, requestID, key); err != nil || found {
+		return p, err
+	}
 	original, version, title, err := readShare(tx, token)
 	if err != nil {
-		return nil, err
-	}
-	var data []byte
-	var source string
-	err = tx.QueryRow(`SELECT p.state,c.source FROM project_copies c JOIN projects p ON p.id=c.project_id WHERE c.session_hash=? AND c.request_id=?`, sessionHash, requestID).Scan(&data, &source)
-	key := "share:" + core.Hash([]byte(token))
-	if err == nil {
-		if source != key {
-			return nil, errors.New("请求标识已用于其他副本")
-		}
-		return decode(data)
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	files, reports, err := original.PreviewFiles(version)
