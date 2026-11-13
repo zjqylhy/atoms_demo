@@ -8,8 +8,7 @@ export function AppPreview({projectId,version,csrf,sharedToken,onReady,onFailure
   const frame = useRef<HTMLIFrameElement>(null);
   const [instance] = useState(() => crypto.randomUUID());
   const [access,setAccess] = useState<Access>();
-  const [status,setStatus] = useState('正在连接应用数据…');
-  const [problem,setProblem] = useState(false);
+  const [problem,setProblem] = useState('');
   const [reload,setReload] = useState(0);
   const current = useRef<Access | undefined>(undefined);
   const trial = useRef<AppState | undefined>(undefined);
@@ -28,6 +27,7 @@ export function AppPreview({projectId,version,csrf,sharedToken,onReady,onFailure
     if (!active.current || turn !== lifetime.current) throw new DOMException('预览已关闭','AbortError');
     if(expectedVersion && (value.mode!=='formal' || value.version!==expectedVersion)) throw new Error('当前交付版本已改变，请刷新预览');
     current.current = value; setAccess(value);
+    setProblem(value.mode === 'incompatible' ? '数据格式不兼容，请切回兼容版本；正式数据已保留' : '');
     if (value.mode === 'trial' && !trial.current) trial.current = {schema_version:value.contract!.schema_version,revision:0,value:structuredClone(value.contract!.initial_state)};
     return value;
   }
@@ -36,10 +36,8 @@ export function AppPreview({projectId,version,csrf,sharedToken,onReady,onFailure
     const turn = lifetime.current;
     grant().then(value => {
       if (!active.current || turn !== lifetime.current) return;
-      setStatus(value.mode === 'formal' ? '已连接服务端 · 保存后可刷新或跨设备恢复' : value.mode === 'trial' ? '试用数据 · 草稿和历史版本不会修改正式数据' : value.mode === 'incompatible' ? '数据格式不兼容，请切回兼容版本；正式数据已保留' : '旧版应用 · 尚未接入持久化，页面内的修改可能随刷新丢失');
-      setProblem(value.mode === 'incompatible');
       if(requireFormal && value.mode!=='formal') initialFailure(new Error('演示版本暂不能连接正式应用数据'));
-    }).catch(error => { if(active.current && turn === lifetime.current && error.name!=='AbortError'){setStatus(error.message);setProblem(true);initialFailure(error);} });
+    }).catch(error => { if(active.current && turn === lifetime.current && error.name!=='AbortError'){setProblem(error.message);initialFailure(error);} });
     return () => {active.current=false;lifetime.current++;port.current?.close();port.current=undefined;};
   },[projectId,version,csrf]);
   function initialFailure(error:Error) { if(active.current && !ready.current) observers.current.onFailure?.(error); }
@@ -87,15 +85,14 @@ export function AppPreview({projectId,version,csrf,sharedToken,onReady,onFailure
       pending.current=true;
       try {
         if(data.op!=='load' && data.op!=='save') throw new Error('不支持的数据操作');
-        if(data.op==='save')setStatus('正在保存…');
         const result=data.op==='load'?await load():await save(data.value,data.expectedRevision,data.requestId);
         if(!active.current || port.current!==channel.port1) return;
-        setProblem(false);setStatus(current.current?.mode==='formal'?'已保存到服务端':'已保存试用数据 · 切换项目后重置');
+        setProblem('');
         reply({result});
         // A loaded iframe may contain an error page. The first data reply proves
         // that this sandbox instance connected to the platform successfully.
         if(data.op==='load' && !ready.current){ready.current=true;observers.current.onReady?.();}
-      } catch(error){const err=error as Error & {status?:number};if(active.current && port.current===channel.port1){setProblem(true);setStatus(err.message);initialFailure(err);}reply({error:err.message,status:err.status});}
+      } catch(error){const err=error as Error & {status?:number};if(active.current && port.current===channel.port1){setProblem(err.message);initialFailure(err);}reply({error:err.message,status:err.status});}
       finally{pending.current=false;}
     };
     // The sandbox has an opaque origin. Only this window receives the port;
@@ -106,23 +103,26 @@ export function AppPreview({projectId,version,csrf,sharedToken,onReady,onFailure
     const url=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));
     const link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
   }
+  // Keep data controls and actionable errors without a permanent status notice.
+  const showDataBar = Boolean(problem || access?.contract || access?.mode==='formal' || access?.mode==='incompatible');
   return <div className="app-preview">
-    <div className={'app-data-bar '+(problem?'error':'')} role="status"><span>{status}</span>
+    {showDataBar && <div className={'app-data-bar '+(problem?'error':'')}>
+      {problem && <span role="alert">{problem}</span>}
       {access?.mode==='incompatible' && <><button onClick={()=>download(access.state,'atoms-data-before-reset.json')}>导出原数据</button><button onClick={async()=>{
         if(!confirm('新代码的数据格式与原数据不兼容。确认备份原数据并使用新版初始数据？原数据保留在最近 3 次备份中。'))return;
-        try{await api('/app-state/reset',{method:'POST',body:JSON.stringify({version:access.version,expected_revision:access.state!.revision,request_id:crypto.randomUUID()})});await grant();setReload(n=>n+1);}catch(error){setStatus((error as Error).message);setProblem(true);}
+        try{await api('/app-state/reset',{method:'POST',body:JSON.stringify({version:access.version,expected_revision:access.state!.revision,request_id:crypto.randomUUID()})});await grant();setReload(n=>n+1);}catch(error){setProblem((error as Error).message);}
       }}>备份并重置为新版</button></>}
-      {access?.contract && access.mode!=='incompatible' && <><button onClick={()=>load().then(data=>download(data,'atoms-data.json')).catch(error=>{setStatus(error.message);setProblem(true);})}>导出数据</button>
+      {access?.contract && access.mode!=='incompatible' && <><button onClick={()=>load().then(data=>download(data,'atoms-data.json')).catch(error=>setProblem(error.message))}>导出数据</button>
         <label className="data-import">导入数据<input type="file" accept=".json,application/json" hidden onChange={async event=>{
           const file=event.target.files?.[0];event.target.value='';if(!file)return;
           try {if(file.size>270000)throw new Error('文件超过大小限制');const value=JSON.parse(await file.text()) as AppState;
             if(value.schema_version!==access.contract!.schema_version)throw new Error('导入的数据格式版本不兼容');
             if(!confirm(access.mode==='formal'?'导入将替换当前应用数据，服务端会保留最近 3 次导入前备份。确认继续？':'导入将替换当前试用数据，请先导出需要保留的内容。确认继续？'))return;
             const before=await load();await save(value.value,before.revision,crypto.randomUUID(),true);setReload(n=>n+1);
-          }catch(error){setStatus((error as Error).message);setProblem(true);}
+          }catch(error){setProblem((error as Error).message);}
         }}/></label></>}
-      {(access?.mode==='formal'||access?.mode==='incompatible') && <button onClick={()=>api('/app-backups').then(data=>download(data,'atoms-data-backups.json')).catch(error=>setStatus(error.message))}>下载备份</button>}
-    </div>
+      {(access?.mode==='formal'||access?.mode==='incompatible') && <button onClick={()=>api('/app-backups').then(data=>download(data,'atoms-data-backups.json')).catch(error=>setProblem(error.message))}>下载备份</button>}
+    </div>}
     {access && <iframe ref={frame} key={reload} title="生成产物预览" sandbox="allow-scripts allow-forms" onLoad={connect} src={`${base}/preview?version=${encodeURIComponent(version)}&instance=${instance}`}/>}
   </div>;
 }

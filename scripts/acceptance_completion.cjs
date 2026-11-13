@@ -18,7 +18,7 @@ async function stop(){if(!child||child.exitCode!==null)return;const exited=new P
 async function api(context,url,method='GET',body,csrf=boot?.csrf){const response=await context.request.fetch(base+url,{method,headers:csrf?{'X-CSRF-Token':csrf}:{},data:body});let data;try{data=await response.json();}catch{data=await response.text();}return {status:response.status(),data};}
 function record(name,detail){results.push({name,detail,status:'passed'});console.log('PASS '+name);}
 async function app(){return page.frameLocator('iframe[title="生成产物预览"]');}
-async function savedText(text){await (await app()).locator('#items').filter({hasText:text}).waitFor();await page.locator('.app-data-bar').filter({hasText:'已保存到服务端'}).waitFor();}
+async function savedText(text){await (await app()).locator('#items').filter({hasText:text}).waitFor();}
 (async()=>{
   await fs.mkdir(out,{recursive:true});const port=await freePort();base=`http://127.0.0.1:${port}`;await start(port);
   browser=await chromium.launch({headless:true,...(process.platform==='win32'?{executablePath:'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'}:{})});
