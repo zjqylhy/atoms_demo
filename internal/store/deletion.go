@@ -41,6 +41,7 @@ func (s *Store) DeleteProject(sessionHash, id string) error {
 		state      []byte
 		references []byte
 		changed    bool
+		updated    string
 	}
 	states := []remaining{}
 	for rows.Next() {
@@ -77,6 +78,9 @@ func (s *Store) DeleteProject(sessionHash, id string) error {
 			if target == id {
 				recovery["unavailable"] = json.RawMessage(`true`)
 				object["recovery"], _ = json.Marshal(recovery)
+				// SSE observes Updated, including changes without a new chat event.
+				item.updated = core.Now()
+				object["updated"], _ = json.Marshal(item.updated)
 				item.state, err = json.Marshal(object)
 				if err != nil {
 					rows.Close()
@@ -94,7 +98,7 @@ func (s *Store) DeleteProject(sessionHash, id string) error {
 	}
 	for _, item := range states {
 		if item.changed {
-			if _, err = tx.Exec(`UPDATE projects SET state=? WHERE id=?`, item.state, item.id); err != nil {
+			if _, err = tx.Exec(`UPDATE projects SET state=?,updated=? WHERE id=?`, item.state, item.updated, item.id); err != nil {
 				return err
 			}
 		}

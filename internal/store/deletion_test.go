@@ -200,8 +200,13 @@ func TestDeletingFallbackDoesNotRecreateIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	demo := p.Recovery.ProjectID
+	previousUpdate := p.Updated
 	if err = s.DeleteProject(a.TokenHash, demo); err != nil {
 		t.Fatal(err)
+	}
+	changed, err := s.Get(p.Owner, p.ID)
+	if err != nil || changed.Updated == previousUpdate || !changed.Recovery.Unavailable {
+		t.Fatal("demo removal not observable", changed, err)
 	}
 	prepare("run2")
 	p, err = s.InstallFallback(p.Owner, p.ID, "run2", "board", "still no model")
@@ -211,5 +216,54 @@ func TestDeletingFallbackDoesNotRecreateIt(t *testing.T) {
 	list, _ := s.SharedProjects(a.TokenHash)
 	if len(list) != 1 {
 		t.Fatal("demo recreated", list)
+	}
+}
+
+func TestDeletionSurvivesRestartAndReleasesOnlyProjectCapacity(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "persist.db")
+	s, err := Open(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { s.Close() }()
+	_, a := testAccount(t, s)
+	_, b := testAccount(t, s)
+	p, err := s.CopyPreset(a.TokenHash, "board", "persisted-copy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 29; i++ {
+		if _, err = s.Create(a.Workspace, "capacity"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err = s.Create(a.Workspace, "full"); err == nil {
+		t.Fatal("capacity not enforced")
+	}
+	if err = s.ReserveCall(a.Workspace, 0, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.DeleteProject(b.TokenHash, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s, err = Open(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Get(p.Owner, p.ID); !errors.Is(err, core.ErrNotFound) {
+		t.Fatal("deleted project restored", err)
+	}
+	if _, err = s.CopyPreset(a.TokenHash, "board", "persisted-copy"); !errors.Is(err, ErrCopyDeleted) {
+		t.Fatal("receipt lost on restart", err)
+	}
+	if _, err = s.Create(a.Workspace, "reclaimed slot"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Create(a.Workspace, "still full"); err == nil {
+		t.Fatal("released too many slots")
+	}
+	if err = s.ReserveCall(a.Workspace, 0, 1); err == nil {
+		t.Fatal("quota lost on restart")
 	}
 }
