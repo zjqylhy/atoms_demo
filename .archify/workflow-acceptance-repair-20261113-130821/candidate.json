@@ -1,0 +1,477 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "产物验收修复 · 后端与大模型分工",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": ".archify/workflow-acceptance-repair-20261113-130821/acceptance-repair.html",
+    "repository": {
+      "url": "https://github.com/zjqylhy/atoms_demo.git",
+      "revision": "08121ebcce78601a00b6388ea3d53dc2e00ae932",
+      "link_mode": "local-only"
+    },
+    "legend": {
+      "entries": {
+        "cloud": {
+          "label": "大模型"
+        },
+        "backend": {
+          "label": "后端程序 · 逻辑"
+        },
+        "security": {
+          "label": "后端程序 · 判定"
+        },
+        "database": {
+          "label": "后端程序 · 保存"
+        },
+        "messagebus": {
+          "label": "后端 / 执行器 · 运行"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "model_submit",
+      "label": "大模型：主协调者理解结果并申请完成"
+    },
+    {
+      "id": "acceptance",
+      "label": "后端程序：核对证据并决定能否交付"
+    },
+    {
+      "id": "recovery",
+      "label": "后端程序：生成缺项反馈并限制重复",
+      "variant": "exception"
+    },
+    {
+      "id": "model_repair",
+      "label": "大模型：主协调者定方案，专家给出修改和检查参数"
+    },
+    {
+      "id": "execution",
+      "label": "后端程序 / 执行器：实际运行并保存事实"
+    }
+  ],
+  "mainPath": [
+    "model_request",
+    "request",
+    "fence",
+    "evidence",
+    "assessment",
+    "ready",
+    "deliver"
+  ],
+  "nodes": [
+    {
+      "id": "model_request",
+      "lane": "model_submit",
+      "col": 0,
+      "type": "cloud",
+      "label": "决定申请完成",
+      "sublabel": "主模型输出工具调用",
+      "tag": "大模型 · 现有",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/engine.go",
+          "line": 693,
+          "end_line": 695,
+          "label": "模型角色的完成申请职责"
+        },
+        {
+          "path": "internal/agent/tools.go",
+          "line": 46,
+          "end_line": 46,
+          "label": "申请完成工具定义"
+        }
+      ]
+    },
+    {
+      "id": "request",
+      "lane": "acceptance",
+      "col": 0,
+      "type": "backend",
+      "label": "接收完成申请",
+      "sublabel": "接收模型的工具调用",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/tools.go",
+          "line": 431,
+          "end_line": 450,
+          "label": "现有完成申请"
+        }
+      ],
+      "tag": "后端 · 保留"
+    },
+    {
+      "id": "fence",
+      "lane": "acceptance",
+      "col": 1,
+      "type": "security",
+      "label": "运行有效性",
+      "sublabel": "运行与用户指令版本",
+      "tag": "后端 · 保留",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/steering.go",
+          "line": 44,
+          "end_line": 52,
+          "label": "保留现有版本校验"
+        }
+      ]
+    },
+    {
+      "id": "evidence",
+      "lane": "acceptance",
+      "col": 2,
+      "type": "backend",
+      "label": "核对相关证据",
+      "sublabel": "实际依赖与验收条件",
+      "tag": "后端 · 修改",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/acceptance.go",
+          "line": 75,
+          "end_line": 101,
+          "label": "拟改造的证据判定入口"
+        }
+      ]
+    },
+    {
+      "id": "assessment",
+      "lane": "acceptance",
+      "col": 3,
+      "type": "backend",
+      "label": "汇总全部缺项",
+      "sublabel": "缺少、失败或已过期",
+      "tag": "后端 · 新增",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/artifacts.go",
+          "line": 124,
+          "end_line": 138,
+          "label": "拟重构的完成检查入口"
+        }
+      ]
+    },
+    {
+      "id": "ready",
+      "lane": "acceptance",
+      "col": 4,
+      "type": "security",
+      "label": "全部满足验收",
+      "sublabel": "按具体入口与目标",
+      "tag": "后端 · 修改判定依据",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/artifacts.go",
+          "line": 169,
+          "end_line": 218,
+          "label": "现有交付门槛"
+        }
+      ]
+    },
+    {
+      "id": "deliver",
+      "lane": "acceptance",
+      "col": 5,
+      "type": "database",
+      "label": "保存交付版本",
+      "sublabel": "事务内再次核对",
+      "tag": "后端 · 保留",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/tools.go",
+          "line": 449,
+          "end_line": 460,
+          "label": "现有版本创建与保存"
+        }
+      ]
+    },
+    {
+      "id": "feedback",
+      "lane": "recovery",
+      "col": 3,
+      "type": "backend",
+      "label": "准备缺项反馈",
+      "sublabel": "目标、原因、补验方式",
+      "tag": "后端 · 修改",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/feedback.go",
+          "line": 10,
+          "end_line": 19,
+          "label": "拟扩展的反馈入口"
+        }
+      ]
+    },
+    {
+      "id": "count",
+      "lane": "recovery",
+      "col": 4,
+      "type": "backend",
+      "label": "累计相同失败",
+      "sublabel": "排除总结与报告编号",
+      "tag": "后端 · 修改",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/tool_protocol.go",
+          "line": 110,
+          "end_line": 112,
+          "label": "拟修改的失败标识"
+        },
+        {
+          "path": "internal/agent/policy.go",
+          "line": 42,
+          "end_line": 61,
+          "label": "现有失败计数"
+        }
+      ]
+    },
+    {
+      "id": "budget",
+      "lane": "recovery",
+      "col": 5,
+      "type": "security",
+      "label": "恢复预算检查",
+      "sublabel": "重复与恢复次数",
+      "tag": "后端 · 保留阈值",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/policy.go",
+          "line": 65,
+          "end_line": 99,
+          "label": "现有有限恢复预算"
+        }
+      ]
+    },
+    {
+      "id": "record",
+      "lane": "execution",
+      "col": 2,
+      "type": "database",
+      "label": "记录新的证据",
+      "sublabel": "相关文件与真实结果",
+      "tag": "后端 · 修改",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/runner.go",
+          "line": 413,
+          "end_line": 448,
+          "label": "现有报告与输出提交入口"
+        }
+      ]
+    },
+    {
+      "id": "repair",
+      "lane": "execution",
+      "col": 3,
+      "type": "messagebus",
+      "label": "执行修改或检查",
+      "sublabel": "静态检查或沙箱实跑",
+      "tag": "后端 / 执行器",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/tools.go",
+          "line": 376,
+          "end_line": 426,
+          "label": "后端实际执行检查工具"
+        },
+        {
+          "path": "runner/job.cjs",
+          "line": 613,
+          "end_line": 624,
+          "label": "执行器实际运行脚本与浏览器"
+        }
+      ]
+    },
+    {
+      "id": "stop",
+      "lane": "execution",
+      "col": 5,
+      "type": "database",
+      "label": "保留进度停止",
+      "sublabel": "文件、报告与检查点",
+      "tag": "后端 · 保留",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/engine.go",
+          "line": 271,
+          "end_line": 277,
+          "label": "现有恢复预算停止路径"
+        }
+      ]
+    },
+    {
+      "id": "model_decision",
+      "lane": "model_repair",
+      "col": 3,
+      "type": "cloud",
+      "label": "选择修正与补验",
+      "sublabel": "提出分派和工具参数",
+      "tag": "大模型 · 现有",
+      "width": 132,
+      "sources": [
+        {
+          "path": "internal/agent/engine.go",
+          "line": 714,
+          "end_line": 721,
+          "label": "主模型规划与专家提供工具参数"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "model-request",
+      "from": "model_request",
+      "to": "request",
+      "label": "调用意图",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "route": "straight"
+    },
+    {
+      "id": "request-fence",
+      "from": "request",
+      "to": "fence"
+    },
+    {
+      "id": "fence-evidence",
+      "from": "fence",
+      "to": "evidence",
+      "label": "有效"
+    },
+    {
+      "id": "evidence-assessment",
+      "from": "evidence",
+      "to": "assessment"
+    },
+    {
+      "id": "assessment-ready",
+      "from": "assessment",
+      "to": "ready"
+    },
+    {
+      "id": "ready-deliver",
+      "from": "ready",
+      "to": "deliver",
+      "label": "满足",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ready-feedback",
+      "from": "ready",
+      "to": "feedback",
+      "label": "有缺项",
+      "role": "branch",
+      "variant": "security"
+    },
+    {
+      "id": "feedback-count",
+      "from": "feedback",
+      "to": "count"
+    },
+    {
+      "id": "count-budget",
+      "from": "count",
+      "to": "budget"
+    },
+    {
+      "id": "budget-repair",
+      "from": "budget",
+      "to": "model_decision",
+      "label": "预算内反馈",
+      "role": "branch"
+    },
+    {
+      "id": "budget-stop",
+      "from": "budget",
+      "to": "stop",
+      "label": "已用尽",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "id": "repair-record",
+      "from": "repair",
+      "to": "record",
+      "role": "return"
+    },
+    {
+      "id": "record-evidence",
+      "from": "record",
+      "to": "model_request",
+      "label": "返回实际结果",
+      "role": "return",
+      "variant": "dashed"
+    },
+    {
+      "id": "model-execute",
+      "from": "model_decision",
+      "to": "repair",
+      "label": "工具请求",
+      "role": "main"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "violet",
+      "title": "大模型做什么",
+      "items": [
+        "主协调者根据需求和反馈决定下一步，提出分派或完成申请。",
+        "专家生成修改内容、测试步骤、断言期望值和工具参数。",
+        "模型的判断与总结属于建议，工具调用由后端实际执行。"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "后端程序做什么",
+      "items": [
+        "计算 hash、判断证据是否有效、列出缺项、累计重复失败。",
+        "执行器属于程序侧：真实运行脚本、构建网页和操作浏览器。",
+        "后端保存报告并核对交付门槛，模型不能自行写入通过状态。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "提案与源码的关系",
+      "items": [
+        "本图展示拟实现流程，尚未编码或上线。",
+        "源码引用标注现有职责和拟改造入口，不表示新增行为已存在。"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "证据按依赖复用",
+      "items": [
+        "网页检查依赖入口及实际引用的脚本、样式和资源。",
+        "与网页无关的 PPTX 变化不影响该网页证据。",
+        "动态脚本依赖不明确时保守使用全输入，并解释原因。"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "有界恢复",
+      "items": [
+        "只换交付总结、报告编号或展示顺序，不重置同一失败。",
+        "补齐一个缺项，只解决该项，不清空其他未解决问题。",
+        "旧证据信息不足时有针对性补验，保留原始记录。"
+      ]
+    }
+  ]
+}

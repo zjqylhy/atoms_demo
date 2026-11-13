@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mockatoms/internal/core"
 	"strings"
@@ -15,7 +16,8 @@ type toolProtocol struct {
 	currentAtCommit bool
 	local           bool
 	inputs          func(*core.Project, map[string]any) core.Manifest
-	conditions      func(*core.Project) string
+	retry           func(*core.Project, map[string]any, *core.ActionFact)
+	retryArguments  func(map[string]any) map[string]any
 }
 
 func fileInputs(fields ...string) func(*core.Project, map[string]any) core.Manifest {
@@ -52,7 +54,7 @@ var toolProtocols = map[string]toolProtocol{
 	"assign_step":     {control: "delegate", label: "接收角色交付"},
 	"ask_user":        {control: "wait", label: "等待用户补充", currentAtCommit: true},
 	"propose_plan":    {control: "plan", label: "提交计划", currentAtCommit: true},
-	"finish_task":     {control: "finish", label: "完成任务", currentAtCommit: true, local: true, inputs: allInputs, conditions: completionConditions},
+	"finish_task":     {control: "finish", label: "完成任务", currentAtCommit: true, local: true, inputs: allInputs, retry: completionRetry, retryArguments: completionArguments},
 	"return_step":     {control: "return", label: "交回主 Agent", currentAtCommit: true},
 }
 
@@ -67,20 +69,45 @@ func actionFact(p *core.Project, s scope, c core.Call) core.ActionFact {
 		inputs = profile.inputs(p, args)
 	}
 	conditions := fmt.Sprintf("instruction:%d;approved:%t", s.InstructionVersion, permitted(p.Tasks[s.Task]))
-	if profile.conditions != nil {
-		conditions += ";" + profile.conditions(p)
+	fact := core.ActionFact{Disposition: "executed", Inputs: inputs, Deterministic: profile.local, Conditions: conditions}
+	if profile.retry != nil {
+		profile.retry(p, args, &fact)
 	}
-	return core.ActionFact{Disposition: "executed", Inputs: inputs, Deterministic: profile.local, Conditions: conditions}
+	return fact
 }
 
-func completionConditions(p *core.Project) string {
-	checks := map[string]string{}
-	for _, r := range p.Reports {
-		if reportCurrent(p, p.Tasks[p.CurrentTask], r) {
-			checks[r.Kind+":"+reportExecution(r)] = r.Status + core.JSON(r.Checks)
-		}
+func completionArguments(args map[string]any) map[string]any {
+	delete(args, "summary")
+	// Missing and explicit false use the same delivery mode.
+	if args["answer_only"] == nil {
+		args["answer_only"] = false
 	}
-	return core.Hash([]byte(core.JSON(checks)))
+	return args
+}
+
+func completionRetry(p *core.Project, args map[string]any, fact *core.ActionFact) {
+	if answerOnly, _ := args["answer_only"].(bool); answerOnly {
+		return
+	}
+	fact.RetryVersion = 1
+	fact.Inputs = nil
+	for _, issue := range assessAcceptance(p).Issues {
+		fact.RetryKeys = append(fact.RetryKeys, issue.Basis)
+	}
+	fact.RetryKeys = sortedUnique(fact.RetryKeys)
+}
+
+func recordFailure(fact *core.ActionFact, failure error) {
+	fact.ErrorClass = "validation"
+	fact.ErrorCode = core.Hash([]byte(failure.Error()))
+	var assessment *AcceptanceAssessment
+	if errors.As(failure, &assessment) {
+		fact.ErrorCode = assessment.Code
+	} else {
+		// Parameter/permission errors must not increment unrelated acceptance blockers.
+		fact.RetryVersion = 0
+		fact.RetryKeys = nil
+	}
 }
 
 func toolEvent(c core.Call) string {
@@ -108,5 +135,17 @@ func normalizedArguments(raw string) string {
 }
 
 func failureFingerprint(tool, args string, fact core.ActionFact) string {
-	return core.Hash([]byte(tool + "\n" + normalizedArguments(args) + "\n" + core.JSON(fact.Inputs) + "\n" + fact.Conditions + "\n" + fact.ErrorCode))
+	if project := toolProtocols[tool].retryArguments; project != nil {
+		decoder := json.NewDecoder(strings.NewReader(args))
+		decoder.UseNumber()
+		var values map[string]any
+		if decoder.Decode(&values) == nil && values != nil {
+			args = core.JSON(project(values))
+		}
+	}
+	basis := tool + "\n" + normalizedArguments(args) + "\n" + core.JSON(fact.Inputs) + "\n" + fact.Conditions + "\n" + fact.ErrorCode
+	if fact.RetryVersion == 1 {
+		basis += "\nacceptance-v1\n" + core.JSON(fact.RetryKeys)
+	}
+	return core.Hash([]byte(basis))
 }

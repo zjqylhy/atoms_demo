@@ -399,16 +399,7 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 404, err)
 		return
 	}
-	markup := ""
-	for _, report := range p.Reports {
-		if report.Digest == manifest.Digest() {
-			var d map[string]any
-			_ = json.Unmarshal(report.Details, &d)
-			if html, ok := d["preview_html"].(string); ok {
-				markup = html
-			}
-		}
-	}
+	markup := core.PreviewHTML(p.Reports, manifest)
 	if markup == "" {
 		s.fail(w, 404, errors.New("尚未生成可预览构建，请查看文件或继续执行"))
 		return

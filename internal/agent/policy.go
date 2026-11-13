@@ -51,6 +51,17 @@ func observeFact(t *core.Task, step core.Step, threshold int) bool {
 	if !fact.Deterministic || fact.ErrorCode == "" || fact.Fingerprint == "" || fact.ErrorClass == "transient" || fact.ErrorClass == "unknown" {
 		return false
 	}
+	if fact.RetryVersion == 1 && len(fact.RetryKeys) > 0 {
+		blocked := false
+		for _, key := range sortedUnique(fact.RetryKeys) {
+			obs.Failures[key]++
+			blocked = blocked || obs.Failures[key] >= threshold
+		}
+		if blocked {
+			obs.Reason = "同一验收缺项在相同依赖与要求下重复失败；改变总结或重登报告不能补齐证据，请按具体验收反馈补验"
+		}
+		return blocked
+	}
 	obs.Failures[fact.Fingerprint]++
 	// Store the exact attempted conditions separately from the returned error.
 	obs.Actions[fact.ActionKey] = fact.Fingerprint
@@ -72,7 +83,19 @@ func (e *Engine) admitTool(s scope, c core.Call, fact core.ActionFact) error {
 	obs := observation(t)
 	signature := actionSignature(c.Function.Name, c.Function.Arguments, fact)
 	fingerprint := obs.Actions[signature]
-	if fingerprint == "" || obs.Failures[fingerprint] < positive(e.Config.RepeatFailures, 3) {
+	blocked := fingerprint != "" && obs.Failures[fingerprint] >= positive(e.Config.RepeatFailures, 3)
+	if fact.RetryVersion == 1 {
+		// Schema and permission rejections use the generic rule instead of
+		// acceptance blockers. Preserve admission for those recorded failures.
+		generic := fact
+		generic.RetryVersion, generic.RetryKeys = 0, nil
+		prior := obs.Actions[actionSignature(c.Function.Name, c.Function.Arguments, generic)]
+		blocked = blocked || prior != "" && obs.Failures[prior] >= positive(e.Config.RepeatFailures, 3)
+		for _, key := range fact.RetryKeys {
+			blocked = blocked || obs.Failures[key] >= positive(e.Config.RepeatFailures, 3)
+		}
+	}
+	if !blocked {
 		return nil
 	}
 	reason := obs.Reason

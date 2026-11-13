@@ -212,6 +212,7 @@ func (c runnerClient) result(ctx context.Context, jobID, digest string, body []b
 
 func (e *Engine) executeRunner(ctx context.Context, s scope, c core.Call, args map[string]any, p *core.Project) (string, error) {
 	action := core.RunnerAction{Inputs: core.Clone(p.Files), RunID: s.Run, Epoch: s.Epoch, Call: &c,
+		EvidenceVersion: evidenceVersion, EvidencePlan: core.Clone(p.Tasks[s.Task].Plan),
 		FrameID: s.Frame, CallID: c.ID, InstructionVersion: s.InstructionVersion,
 		JobID: core.Hash([]byte(s.Task + "/" + s.Frame + "/" + c.ID)),
 	}
@@ -376,6 +377,7 @@ func (e *Engine) runRunner(ctx context.Context, s scope, c core.Call, args map[s
 		}
 	}
 	result.Details["run_id"] = s.Run
+	result.Details["entry"] = str(args, "entry")
 	kind := "run"
 	if c.Function.Name == "test_preview" {
 		kind = "browser"
@@ -413,6 +415,13 @@ func (e *Engine) runRunner(ctx context.Context, s scope, c core.Call, args map[s
 	report := core.Report{ID: jobID, Kind: kind, Digest: digest, At: core.Now(), Status: result.Status, Checks: result.Checks, Details: json.RawMessage(core.JSON(result.Details))}
 	if action.Inputs != nil {
 		report.Evidence = &core.ReportEvidence{TaskID: s.Task, InstructionVersion: action.InstructionVersion, PlanRevision: action.PlanRevision, Inputs: inputs, Outputs: outputs, RunID: action.RunID, Epoch: action.Epoch}
+		if action.EvidenceVersion == evidenceVersion {
+			// Recover against the contract registered with the original job, never
+			// stamp a newly edited plan onto an old execution receipt.
+			task := core.Clone(*p.Tasks[s.Task])
+			task.Plan = action.EvidencePlan
+			runnerEvidence(&task, report.Evidence, report, args)
+		}
 	}
 	fact := actionFact(p, s, c)
 	if failureCode != "" {
