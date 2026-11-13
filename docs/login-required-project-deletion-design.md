@@ -227,3 +227,14 @@ flowchart TD
 - 删除只针对在线项目及其关联数据。已导出文件、独立副本、历史部署备份和执行器按既定策略保留的临时结果不属于在线项目的可恢复入口，不承诺磁盘安全擦除。
 
 技术方案确认后进入编码与验证；本方案未授权实际删除任何已有用户项目。
+
+## 9 可查看流程图与本轮文档验证
+
+| 流程图（类型均为 workflow） | 规格来源 | 本轮检查 |
+| --- | --- | --- |
+| [登录与全局共享](../.archify/workflow-login-required-project-deletion-20261113-212826/login/shared-login.html) | [候选规格](../.archify/workflow-login-required-project-deletion-20261113-212826/login/candidate.json)；本方案第 2～3 节 | 格式、生成、来源及真实浏览器检查通过 |
+| [删除共享项目](../.archify/workflow-login-required-project-deletion-20261113-212826/deletion/delete-project.html) | [候选规格](../.archify/workflow-login-required-project-deletion-20261113-212826/deletion/candidate.json)；本方案第 4 节 | 格式、生成、来源及真实浏览器检查通过 |
+
+[验证摘要与文件摘要值](../.archify/workflow-login-required-project-deletion-20261113-212826/validation.json)记录最终候选和 HTML 的对应关系。来源固定于文档提交 `93face139d8812749a58c318467b377aa8ce03e1`，代表拟实施方案，不代表当前业务代码。图表以本地来源模式交付。
+
+本轮完成了文档一致性、链接及空白检查；未执行产品功能测试，也未进行流程图截图视觉复核。图表自动检查通过不能替代实施后的功能验收。

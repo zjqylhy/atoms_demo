@@ -1,0 +1,304 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "登录与全局共享 · 待确认方案",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": ".archify/workflow-login-required-project-deletion-20261113-212826/login/shared-login.html",
+    "repository": {
+      "url": "https://github.com/zjqylhy/atoms_demo.git",
+      "revision": "93face139d8812749a58c318467b377aa8ce03e1",
+      "provider": "github",
+      "link_mode": "local-only"
+    }
+  },
+  "lanes": [
+    {
+      "id": "access",
+      "label": "工作台与服务端"
+    },
+    {
+      "id": "recovery",
+      "label": "登录与异常处理",
+      "variant": "exception"
+    }
+  ],
+  "mainPath": [
+    "open",
+    "account",
+    "workspace",
+    "operation",
+    "gate",
+    "execute"
+  ],
+  "nodes": [
+    {
+      "id": "open",
+      "lane": "access",
+      "col": 0,
+      "type": "frontend",
+      "label": "打开工作台",
+      "sublabel": "修改：先检查账号",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 79,
+          "end_line": 86,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "account",
+      "lane": "access",
+      "col": 1,
+      "type": "security",
+      "label": "账号有效？",
+      "sublabel": "新增：游客不能进入",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 23,
+          "end_line": 43,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "workspace",
+      "lane": "access",
+      "col": 2,
+      "type": "frontend",
+      "label": "共享工作空间",
+      "sublabel": "修改：显示全部项目",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 45,
+          "end_line": 53,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "operation",
+      "lane": "access",
+      "col": 3,
+      "type": "frontend",
+      "label": "发起操作",
+      "sublabel": "查看 · 编辑 · AI · 删除",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 45,
+          "end_line": 53,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "gate",
+      "lane": "access",
+      "col": 4,
+      "type": "security",
+      "label": "业务入口校验",
+      "sublabel": "有效账号 + 项目存在",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 23,
+          "end_line": 43,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "execute",
+      "lane": "access",
+      "col": 5,
+      "type": "backend",
+      "label": "执行共享操作",
+      "sublabel": "修改：不限制创建者",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 45,
+          "end_line": 53,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "login",
+      "lane": "recovery",
+      "col": 1,
+      "type": "frontend",
+      "label": "独立登录页",
+      "sublabel": "新增：登录 / 注册",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 71,
+          "end_line": 85,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "session",
+      "lane": "recovery",
+      "col": 2,
+      "type": "security",
+      "label": "刷新账号状态",
+      "sublabel": "恢复站内目标与草稿",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 81,
+          "end_line": 86,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "expired",
+      "lane": "recovery",
+      "col": 4,
+      "type": "security",
+      "label": "登录已失效",
+      "sublabel": "清理工作台 保留草稿",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 88,
+          "end_line": 95,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "missing",
+      "lane": "recovery",
+      "col": 5,
+      "type": "frontend",
+      "label": "项目已不存在",
+      "sublabel": "回到新建页 刷新列表",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 59,
+          "end_line": 67,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "open",
+      "to": "account"
+    },
+    {
+      "from": "account",
+      "to": "workspace",
+      "label": "已登录",
+      "variant": "emphasis"
+    },
+    {
+      "from": "account",
+      "to": "login",
+      "label": "未登录",
+      "role": "branch",
+      "variant": "security"
+    },
+    {
+      "from": "login",
+      "to": "session",
+      "label": "成功",
+      "variant": "emphasis"
+    },
+    {
+      "from": "session",
+      "to": "workspace",
+      "role": "return",
+      "variant": "emphasis"
+    },
+    {
+      "from": "workspace",
+      "to": "operation"
+    },
+    {
+      "from": "operation",
+      "to": "gate"
+    },
+    {
+      "from": "gate",
+      "to": "execute",
+      "label": "通过",
+      "variant": "emphasis"
+    },
+    {
+      "from": "gate",
+      "to": "expired",
+      "label": "失效",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "from": "gate",
+      "to": "missing",
+      "label": "已删除",
+      "role": "error",
+      "variant": "dashed"
+    },
+    {
+      "from": "expired",
+      "to": "login",
+      "label": "重新登录",
+      "role": "return",
+      "variant": "dashed",
+      "route": "bottom-channel",
+      "fromSide": "bottom",
+      "toSide": "bottom"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "已确认的共享范围",
+      "items": [
+        "所有登录账号均可查看、修改、发 AI 指令和删除全部项目。",
+        "旧游客项目直接进入共享列表；创建者不再决定访问权限。"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "新增的登录边界",
+      "items": [
+        "前端检查与服务端校验同时生效；无 Cookie 或游客 Cookie 都不能使用业务接口。",
+        "公开介绍和公开分享继续可见；保存副本前需要登录。",
+        "登录失败停留表单；网络错误可重试；成功登录不会自动发出 AI 指令。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "额度和并发",
+      "items": [
+        "AI 运行额度计入发起账号，文件保留原存储位置。",
+        "同项目只允许一个活动运行；应用数据继续检查修订冲突。",
+        "此图描述待确认方案，不代表当前服务已具备这些行为。"
+      ]
+    }
+  ]
+}
