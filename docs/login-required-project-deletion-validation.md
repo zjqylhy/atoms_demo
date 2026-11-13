@@ -67,3 +67,13 @@
 - [最终公网浏览器结果](../artifacts/login-shared-release-20261113T143142Z/public-verification.json)、[未登录 API 边界](../artifacts/login-shared-release-20261113T143142Z/public-auth-boundary.json)
 - [公网桌面登录截图](../artifacts/login-shared-release-20261113T143142Z/public-desktop-login.png)、[390px 登录截图](../artifacts/login-shared-release-20261113T143142Z/public-mobile-login.png)，均已视觉复核
 - [最终生产数据对账](../artifacts/login-shared-release-20261113T143142Z/production-integrity.json)
+
+## 注册确认密码追加（2026-11-13）
+
+按用户要求在注册表单增加确认密码：必填，两次不一致时显示错误、聚焦确认框且不发送注册请求；切换登录/注册时清空两次密码。确认值只用于本地比较，注册接口和数据库不变。
+
+`npm run build --prefix web` 通过；登录与共享删除浏览器回归 12 组、原有应用回归 11 组通过。覆盖确认值为空、不一致、一致注册成功、模式切换清空，以及 390px 注册布局。桌面错误提示和窄屏注册截图已视觉复核，无遮挡或横向溢出。一次复跑在项目加载完成前填写了会被替换的输入框，导致草稿等待超时；脚本改为等待目标项目标题后输入，完整复跑通过，未因此改动业务代码。
+
+- [12 组登录/共享回归结果](../artifacts/login-shared-deletion-2026-11-13T14-58-46-661Z/results.json)
+- [11 组原有应用回归结果](../artifacts/acceptance-completion-2026-11-13T14-57-58-182Z/results.json)
+- [桌面密码不一致提示](../artifacts/login-shared-deletion-2026-11-13T14-57-58-182Z/desktop-register-mismatch.png)、[390px 注册页](../artifacts/login-shared-deletion-2026-11-13T14-57-58-182Z/mobile-register.png)

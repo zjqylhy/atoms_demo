@@ -26,6 +26,7 @@ async function savedText(text){await (await app()).locator('#items').filter({has
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto(base);await page.getByRole('button',{name:'创建账号',exact:true}).click();
   await page.getByLabel('用户名',{exact:true}).fill('acceptance_user');await page.getByLabel('密码',{exact:true}).fill('acceptance passphrase 2026');
+  await page.getByLabel('确认密码',{exact:true}).fill('acceptance passphrase 2026');
   await page.getByRole('button',{name:'注册并进入',exact:true}).click();await page.locator('.catalog-cards>button').first().waitFor();assert.equal(await page.locator('.catalog-cards>button').count(),3);
   await page.screenshot({path:path.join(out,'desktop-home.png'),fullPage:true});
   await page.locator('.catalog-cards>button').first().click();await (await app()).locator('#title').fill('服务重启后保留');await (await app()).locator('#add').click();await savedText('服务重启后保留');

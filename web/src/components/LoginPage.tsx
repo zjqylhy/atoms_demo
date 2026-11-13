@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { ArrowRight, Layers3, Sparkles } from 'lucide-react';
 import { useAuth } from '../Auth';
 
@@ -7,6 +7,9 @@ export function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordMismatch, setPasswordMismatch] = useState(false);
+  const confirmInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   return <main className="login-page">
@@ -14,6 +17,10 @@ export function LoginPage() {
       <a className="login-brand" href="/" aria-label="Atoms Lab 首页"><span><Layers3 size={21}/></span> Atoms Lab</a>
       <form className="login-form" onSubmit={async event => {
         event.preventDefault(); if (busy) return;
+        // Confirmation prevents typing mistakes locally; only the password is sent.
+        if (mode === 'register' && password !== confirmPassword) {
+          setError(''); setPasswordMismatch(true); confirmInput.current?.focus(); return;
+        }
         setBusy(true); setError('');
         try { await login(mode, username, password); }
         catch (e) { if ((e as Error).name !== 'AbortError') setError((e as Error).message); setBusy(false); }
@@ -24,10 +31,15 @@ export function LoginPage() {
         <label htmlFor="login-username">用户名</label>
         <input id="login-username" autoFocus autoComplete="username" required minLength={3} maxLength={32} pattern="[A-Za-z0-9_]{3,32}" placeholder="3～32 位字母、数字或下划线" value={username} onChange={e => setUsername(e.target.value)} disabled={busy}/>
         <label htmlFor="login-password">密码</label>
-        <input id="login-password" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 12 : undefined} maxLength={128} placeholder={mode === 'register' ? '至少 12 个字符' : '输入密码'} value={password} onChange={e => setPassword(e.target.value)} disabled={busy}/>
+        <input id="login-password" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} required minLength={mode === 'register' ? 12 : undefined} maxLength={128} placeholder={mode === 'register' ? '至少 12 个字符' : '输入密码'} value={password} onChange={e => {setPassword(e.target.value); setPasswordMismatch(false);}} disabled={busy}/>
+        {mode === 'register' && <>
+          <label htmlFor="confirm-password">确认密码</label>
+          <input ref={confirmInput} id="confirm-password" type="password" autoComplete="new-password" required maxLength={128} placeholder="请再次输入密码" value={confirmPassword} onChange={e => {setConfirmPassword(e.target.value); setPasswordMismatch(false);}} disabled={busy} aria-invalid={passwordMismatch} aria-describedby={passwordMismatch ? 'confirm-password-error' : undefined}/>
+          {passwordMismatch && <p id="confirm-password-error" className="form-error" role="alert">两次输入的密码不一致，请重新输入。</p>}
+        </>}
         {error && <p className="form-error" role="alert">{error}</p>}
         <button className="login-submit" type="submit" disabled={busy || !boot?.csrf}>{busy ? '正在连接…' : mode === 'login' ? '登录' : '注册并进入'}<ArrowRight size={18}/></button>
-        <p className="login-switch">{mode === 'login' ? '还没有账号？' : '已经有账号？'}<button type="button" disabled={busy} onClick={() => {setMode(mode === 'login' ? 'register' : 'login'); setError(''); setPassword('');}}>{mode === 'login' ? '创建账号' : '立即登录'}</button></p>
+        <p className="login-switch">{mode === 'login' ? '还没有账号？' : '已经有账号？'}<button type="button" disabled={busy} onClick={() => {setMode(mode === 'login' ? 'register' : 'login'); setError(''); setPassword(''); setConfirmPassword(''); setPasswordMismatch(false);}}>{mode === 'login' ? '创建账号' : '立即登录'}</button></p>
         <p className="login-sharing"><Layers3 size={16}/><span>共享工作空间<br/>所有登录账号均可查看、修改和删除项目。</span></p>
       </form>
       <footer>Atoms Lab · 让想法有迹可循</footer>

@@ -14,6 +14,7 @@ async function signIn(p,name,register=false){
   await p.getByRole('heading',{name:'欢迎回来',exact:true}).waitFor();
   if(register)await p.getByRole('button',{name:'创建账号',exact:true}).click();
   await p.getByLabel('用户名',{exact:true}).fill(name);await p.getByLabel('密码',{exact:true}).fill('isolated test password 2026');
+  if(register)await p.getByLabel('确认密码',{exact:true}).fill('isolated test password 2026');
   await p.getByRole('button',{name:register?'注册并进入':'登录',exact:true}).click();
   await p.waitForFunction(()=>!document.querySelector('.login-form'));
 }
@@ -33,6 +34,16 @@ function watch(p){p.on('pageerror',e=>errors.push(e.message));p.setDefaultTimeou
   await page.goto(base);await page.getByRole('heading',{name:'欢迎回来'}).waitFor();
   assert.equal(requests.some(url=>url.includes('/api/projects')),false);assert.equal(await page.locator('.composer').count(),0);
   await page.screenshot({path:path.join(out,'desktop-login.png'),fullPage:true});
+  let registrationRequests=0;
+  page.on('request',r=>{if(new URL(r.url()).pathname==='/api/auth/register')registrationRequests++;});
+  await page.getByRole('button',{name:'创建账号',exact:true}).click();
+  await page.getByLabel('用户名',{exact:true}).fill('confirmation_check');await page.getByLabel('密码',{exact:true}).fill('isolated test password 2026');
+  await page.getByRole('button',{name:'注册并进入',exact:true}).click();assert.equal(registrationRequests,0);assert.equal(await page.getByLabel('确认密码',{exact:true}).evaluate(e=>e.validity.valueMissing),true);
+  await page.getByLabel('确认密码',{exact:true}).fill('different test password');await page.getByRole('button',{name:'注册并进入',exact:true}).click();await page.getByRole('alert').filter({hasText:'两次输入的密码不一致'}).waitFor();assert.equal(registrationRequests,0);
+  assert.equal(await page.getByLabel('确认密码',{exact:true}).evaluate(e=>e===document.activeElement),true);
+  await page.screenshot({path:path.join(out,'desktop-register-mismatch.png'),fullPage:true});
+  await page.getByRole('button',{name:'立即登录',exact:true}).click();assert.equal(await page.getByLabel('确认密码',{exact:true}).count(),0);assert.equal(await page.getByLabel('密码',{exact:true}).inputValue(),'');
+  await page.getByRole('button',{name:'创建账号',exact:true}).click();assert.equal(await page.getByLabel('确认密码',{exact:true}).inputValue(),'');await page.getByRole('button',{name:'立即登录',exact:true}).click();pass('registration confirmation required, mismatch blocks requests, mode switch clears passwords');
   await page.getByLabel('用户名',{exact:true}).fill('unknown_user');await page.getByLabel('密码',{exact:true}).fill('wrong password');await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByRole('alert').filter({hasText:'用户名或密码错误'}).waitFor();
   await signIn(page,'account_a',true);await page.locator('.catalog-cards>button').first().waitFor();pass('login gate, credential error and UI registration');
   await page.locator('.catalog-cards>button').first().click();
@@ -42,12 +53,14 @@ function watch(p){p.on('pageerror',e=>errors.push(e.message));p.setDefaultTimeou
   const b=await browser.newContext({viewport:{width:390,height:844}}),mobile=await b.newPage();watch(mobile);await mobile.goto(base);
   await mobile.getByRole('heading',{name:'欢迎回来'}).waitFor();assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
   await mobile.screenshot({path:path.join(out,'mobile-login.png'),fullPage:true});
+  await mobile.getByRole('button',{name:'创建账号',exact:true}).click();await mobile.getByLabel('确认密码',{exact:true}).waitFor();assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);
+  await mobile.screenshot({path:path.join(out,'mobile-register.png'),fullPage:true});await mobile.getByRole('button',{name:'立即登录',exact:true}).click();
   await signIn(mobile,'account_b',true);assert.ok((await api(b,'/projects')).data.some(p=>p.id===pID));
   await mobile.goto(base+'/?project='+pID);await mobile.getByRole('button',{name:/产物工作区/}).click();
   const mobileFrame=mobile.frameLocator('iframe[title="生成产物预览"]');await mobileFrame.locator('#items').filter({hasText:'跨账号共享的记录'}).waitFor();
   await mobileFrame.locator('#title').fill('B 账号新增');await mobileFrame.locator('#add').click();await mobile.locator('.app-data-bar').filter({hasText:'已保存到服务端'}).waitFor();
   await page.getByRole('button',{name:'刷新预览',exact:true}).click();await frame.locator('#items').filter({hasText:'B 账号新增'}).waitFor();
-  assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);await mobile.screenshot({path:path.join(out,'mobile-shared-app.png'),fullPage:true});pass('390px login and cross-account application writes');
+  assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);await mobile.screenshot({path:path.join(out,'mobile-shared-app.png'),fullPage:true});pass('390px login/registration and cross-account application writes');
 
   const q=(await api(a,'/projects','POST',{title:'可删除的历史项目'})).data;
   await page.reload();await page.getByRole('button',{name:'退出',exact:true}).waitFor();
@@ -73,7 +86,8 @@ function watch(p){p.on('pageerror',e=>errors.push(e.message));p.setDefaultTimeou
   await publicPage.getByRole('button',{name:'登录后创建副本'}).click();assert.match(publicPage.url(),/\/login\?returnTo=/);await signIn(publicPage,'account_a');await publicPage.getByRole('button',{name:'创建共享副本'}).waitFor();assert.equal(new URL(publicPage.url()).pathname,shared.path);assert.equal((await api(a,'/projects')).data.length,beforeCopy);
   await publicPage.getByRole('button',{name:'创建共享副本'}).click();await publicPage.getByRole('button',{name:'退出',exact:true}).waitFor();assert.equal((await api(a,'/projects')).data.length,beforeCopy+1);pass('public share login return without automatic copying');
 
-  await page.goto(base+'/?project='+pID);await page.getByLabel('描述需求',{exact:true}).fill('这段草稿需要同账号恢复，不能自动发送');
+  // Project loading replaces the landing composer; fill only the final form.
+  await page.goto(base+'/?project='+pID);await page.locator('.project-title').filter({hasText:original.title}).waitFor();await page.getByLabel('描述需求',{exact:true}).fill('这段草稿需要同账号恢复，不能自动发送');
   await waitFor(async()=>await page.evaluate(()=>JSON.parse(sessionStorage.getItem('atoms:draft')||'null')?.text?.includes('同账号恢复')));
   // A real revoked session is discovered through the unified download path.
   await page.route('**/events',route=>route.abort());
