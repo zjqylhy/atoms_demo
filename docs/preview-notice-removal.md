@@ -31,5 +31,5 @@ flowchart TD
 - `npm run build --prefix web`：TypeScript 检查与生产构建通过。
 - 既有浏览器验收通过：`acceptance_completion.cjs` 11 项、`fallback_navigation_acceptance.cjs` 19 项、`login_shared_deletion_acceptance.cjs` 12 项。覆盖保存/刷新/后端重启、导入、分享、账号及演示自动跳转。
 - 定向页面检查通过：正常预览只有数据按钮；模拟旧版预览在桌面和 390px 窄屏没有提示栏或顶部占位；模拟备份下载失败仍显示错误。桌面、窄屏及错误截图已检查。
-- 所有检查使用本地独立数据目录、空模型配置，无付费模型调用。旧版与下载失败检查使用注入响应；未修改或验收线上部署。
+- 上述检查使用本地独立数据目录、空模型配置，无付费模型调用。旧版与下载失败检查使用注入响应；后续已于 2026-11-14 03:50（北京时间）发布，线上验证见[发布记录](preview-budget-deployment-20261114.md)。
 - 证据：`artifacts/acceptance-completion-2026-11-13T19-35-13-808Z/`、`artifacts/fallback-navigation-2026-11-13T19-35-13-804Z/`、`artifacts/login-shared-deletion-2026-11-13T19-35-13-807Z/`、`artifacts/preview-notice-removal-20261114/`。
