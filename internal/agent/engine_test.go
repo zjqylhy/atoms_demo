@@ -356,10 +356,28 @@ func TestStopThenContinueKeepsCommittedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.Tasks[p.CurrentTask].Status == "stopped" })
-	if _, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "build", "resume", "continue", ""); err != nil {
+	// Simulate a saved delegation whose old independent deadline has expired.
+	if _, err := e.Store.Mutate("alice", p.ID, nil, func(p *core.Project) error {
+		for _, frame := range p.Tasks[p.CurrentTask].Frames {
+			if frame.Delegation != nil {
+				frame.Delegation.Deadline = time.Now().Add(-time.Minute).UTC().Format(time.RFC3339Nano)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "build", "resume", "continue", "")
+	if err != nil {
 		t.Fatal(err)
 	}
 	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.Tasks[p.CurrentTask].Status == "completed" })
+	wantDeadline := e.delegationDeadline(p, scope{Run: resumed.ActiveRun}).UTC().Format(time.RFC3339Nano)
+	for _, frame := range p.Tasks[p.CurrentTask].Frames {
+		if d := frame.Delegation; d != nil && (d.Deadline != wantDeadline || d.RunID != resumed.ActiveRun || d.Calls != 6) {
+			t.Fatalf("resume did not update the deadline while retaining spent calls: %+v", d)
+		}
+	}
 	for name, f := range before.Files {
 		if p.Files[name] != f {
 			t.Fatal("committed file was regenerated")

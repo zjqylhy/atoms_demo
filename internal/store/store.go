@@ -96,10 +96,8 @@ func (s *Store) List(owner string) ([]map[string]any, error) {
 }
 
 func (s *Store) SharedProjects(sessionHash string) ([]map[string]any, error) {
-	if _, err := s.AccountSession(sessionHash); err != nil {
-		return nil, err
-	}
-	return s.listProjects(`SELECT id,title,updated FROM projects ORDER BY updated DESC,id`)
+	order, err := s.ProjectOrder(sessionHash)
+	return order.Projects, err
 }
 
 func (s *Store) listProjects(query string, args ...any) ([]map[string]any, error) {
@@ -223,7 +221,9 @@ func (s *Store) Files(owner string, m core.Manifest) (map[string]string, error) 
 	return out, nil
 }
 func (s *Store) Recover() error {
-	rows, e := s.db.Query("SELECT owner,id FROM projects")
+	// Idle projects need no recovery write. Keeping their timestamps also
+	// preserves the initial shared list order before its first manual save.
+	rows, e := s.db.Query(`SELECT owner,id FROM projects WHERE COALESCE(json_extract(state,'$.active_run'),'')<>''`)
 	if e != nil {
 		return e
 	}

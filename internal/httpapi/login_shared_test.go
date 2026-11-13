@@ -78,7 +78,7 @@ func TestLoginRequiredForEveryBusinessRoute(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := "/api/projects/" + p.ID
-	routes := [][2]string{{"GET", "/api/projects"}, {"HEAD", "/api/projects"}, {"POST", "/api/projects"}, {"GET", base}, {"HEAD", base}, {"PATCH", base}, {"DELETE", base}, {"POST", base + "/actions"}, {"POST", base + "/inputs"}, {"GET", base + "/files"}, {"HEAD", base + "/export"}, {"GET", base + "/export"}, {"GET", base + "/preview"}, {"POST", base + "/preview-access"}, {"GET", base + "/app-state"}, {"PUT", base + "/app-state"}, {"POST", base + "/app-state/reset"}, {"GET", base + "/app-backups"}, {"GET", base + "/events"}, {"GET", base + "/shares"}, {"POST", base + "/shares"}, {"DELETE", base + "/shares/nope"}, {"POST", "/api/catalog/todo/copy"}, {"POST", "/api/shares/" + strings.Repeat("a", 64) + "/copy"}}
+	routes := [][2]string{{"GET", "/api/project-order"}, {"HEAD", "/api/project-order"}, {"PUT", "/api/project-order"}, {"GET", "/api/projects"}, {"HEAD", "/api/projects"}, {"POST", "/api/projects"}, {"GET", base}, {"HEAD", base}, {"PATCH", base}, {"DELETE", base}, {"POST", base + "/actions"}, {"POST", base + "/inputs"}, {"GET", base + "/files"}, {"HEAD", base + "/export"}, {"GET", base + "/export"}, {"GET", base + "/preview"}, {"POST", base + "/preview-access"}, {"GET", base + "/app-state"}, {"PUT", base + "/app-state"}, {"POST", base + "/app-state/reset"}, {"GET", base + "/app-backups"}, {"GET", base + "/events"}, {"GET", base + "/shares"}, {"POST", base + "/shares"}, {"DELETE", base + "/shares/nope"}, {"POST", "/api/catalog/todo/copy"}, {"POST", "/api/shares/" + strings.Repeat("a", 64) + "/copy"}}
 	for _, kind := range []string{"missing", "guest", "revoked"} {
 		c := authClient()
 		token := ""

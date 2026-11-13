@@ -47,7 +47,7 @@ function watch(p){p.on('pageerror',e=>errors.push(e.message));p.setDefaultTimeou
   await page.getByLabel('用户名',{exact:true}).fill('unknown_user');await page.getByLabel('密码',{exact:true}).fill('wrong password');await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByRole('alert').filter({hasText:'用户名或密码错误'}).waitFor();
   await signIn(page,'account_a',true);await page.locator('.catalog-cards>button').first().waitFor();pass('login gate, credential error and UI registration');
   await page.locator('.catalog-cards>button').first().click();
-  const frame=page.frameLocator('iframe[title="生成产物预览"]');await frame.locator('#title').fill('跨账号共享的记录');await frame.locator('#add').click();await page.locator('.app-data-bar').filter({hasText:'已保存到服务端'}).waitFor();
+  const frame=page.frameLocator('iframe[title="生成产物预览"]');await frame.locator('#title').fill('跨账号共享的记录');await frame.locator('#add').click();await frame.locator('#items').filter({hasText:'跨账号共享的记录'}).waitFor();
   const pID=new URL(page.url()).searchParams.get('project');assert.ok(pID);
   const original=(await api(a,'/projects/'+pID)).data;assert.ok(original.id);
   const b=await browser.newContext({viewport:{width:390,height:844}}),mobile=await b.newPage();watch(mobile);await mobile.goto(base);
@@ -58,7 +58,7 @@ function watch(p){p.on('pageerror',e=>errors.push(e.message));p.setDefaultTimeou
   await signIn(mobile,'account_b',true);assert.ok((await api(b,'/projects')).data.some(p=>p.id===pID));
   await mobile.goto(base+'/?project='+pID);await mobile.getByRole('button',{name:/产物工作区/}).click();
   const mobileFrame=mobile.frameLocator('iframe[title="生成产物预览"]');await mobileFrame.locator('#items').filter({hasText:'跨账号共享的记录'}).waitFor();
-  await mobileFrame.locator('#title').fill('B 账号新增');await mobileFrame.locator('#add').click();await mobile.locator('.app-data-bar').filter({hasText:'已保存到服务端'}).waitFor();
+  await mobileFrame.locator('#title').fill('B 账号新增');await mobileFrame.locator('#add').click();await mobileFrame.locator('#items').filter({hasText:'B 账号新增'}).waitFor();
   await page.getByRole('button',{name:'刷新预览',exact:true}).click();await frame.locator('#items').filter({hasText:'B 账号新增'}).waitFor();
   assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1),false);await mobile.screenshot({path:path.join(out,'mobile-shared-app.png'),fullPage:true});pass('390px login/registration and cross-account application writes');
 
