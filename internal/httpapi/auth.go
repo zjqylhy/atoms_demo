@@ -163,11 +163,20 @@ func (s *Server) clientIP(r *http.Request) string {
 	if err != nil {
 		host = r.RemoteAddr
 	}
-	if s.Config.TrustProxy && net.ParseIP(host) != nil && net.ParseIP(host).IsLoopback() {
+	peer := net.ParseIP(host)
+	trusted := peer != nil && s.Config.TrustProxy && peer.IsLoopback()
+	// A container proxy is not a loopback peer. Trust only the deployment's
+	// explicit addresses; arbitrary clients cannot select a different rate bucket.
+	for _, address := range strings.Split(s.Config.TrustedProxyIPs, ",") {
+		if allowed := net.ParseIP(strings.TrimSpace(address)); peer != nil && allowed != nil && peer.Equal(allowed) {
+			trusted = true
+		}
+	}
+	if trusted {
 		parts := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
 		candidate := strings.TrimSpace(parts[len(parts)-1])
-		if net.ParseIP(candidate) != nil {
-			return candidate
+		if forwarded := net.ParseIP(candidate); forwarded != nil {
+			return forwarded.String()
 		}
 	}
 	return host

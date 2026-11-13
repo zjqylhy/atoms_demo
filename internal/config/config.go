@@ -14,6 +14,7 @@ const defaultMaxRequestBytes = 500 * 1024
 type Config struct {
 	BackupBaseURL, BackupModel, BackupAPIKey                                 string
 	TrustProxy                                                               bool
+	TrustedProxyIPs                                                          string
 	ProviderTPM                                                              int
 	ToolMode                                                                 string
 	Addr, DataDir, WebDir, PublicURL                                         string
@@ -45,6 +46,7 @@ func Load() Config {
 		BackupModel:          os.Getenv("ATOMS_BACKUP_LLM_MODEL"),
 		BackupAPIKey:         os.Getenv("ATOMS_BACKUP_LLM_API_KEY"),
 		TrustProxy:           os.Getenv("ATOMS_TRUST_PROXY") == "1",
+		TrustedProxyIPs:      os.Getenv("ATOMS_TRUSTED_PROXY_IPS"),
 		ProviderTPM:          number("ATOMS_LLM_TPM", 40000),
 		ToolMode:             env("ATOMS_LLM_TOOL_MODE", "native"),
 		Addr:                 env("ATOMS_ADDR", "127.0.0.1:8090"),

@@ -46,6 +46,7 @@ go run ./cmd/server
 | `ATOMS_DATA_DIR / WEB_DIR / ADDR` | 数据目录、前端构建目录、监听地址 |
 | `ATOMS_PUBLIC_URL` | 公网 HTTPS 来源，生产必须配置，用于安全 Cookie 与来源校验 |
 | `ATOMS_TRUST_PROXY` | 仅在回环 Caddy 等可信反向代理后设为 `1`，使用最后一跳 X-Forwarded-For 限流 |
+| `ATOMS_TRUSTED_PROXY_IPS` | 容器代理的精确 IP，逗号分隔；只接受这些来源的最后一跳 X-Forwarded-For。代理 IP 变化时需同步配置，未匹配时按直连来源限流 |
 
 普通 429、网络错误、502/503/504 最多重试 3 次；TPM 沿用最多 2 次等待，二者共享当前动作恢复计数。401/403 和预算不足不原样重试。备用、超时和结果未知的调用都占用原有额度，不将超时视为免费。HTTP 调用保留 300 秒上限，并受本轮剩余时间约束。
 
