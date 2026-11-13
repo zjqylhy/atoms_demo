@@ -77,3 +77,12 @@
 - [12 组登录/共享回归结果](../artifacts/login-shared-deletion-2026-11-13T14-58-46-661Z/results.json)
 - [11 组原有应用回归结果](../artifacts/acceptance-completion-2026-11-13T14-57-58-182Z/results.json)
 - [桌面密码不一致提示](../artifacts/login-shared-deletion-2026-11-13T14-57-58-182Z/desktop-register-mismatch.png)、[390px 注册页](../artifacts/login-shared-deletion-2026-11-13T14-57-58-182Z/mobile-register.png)
+
+2026-11-13 23:00（北京时间）已发布至 `20261113T145942Z`，前端源码提交 `defb45b`。后端复用 `fdcdb51` 的已发布二进制，执行器和部署文件逐项验证一致；原子切换静态文件目录，两个服务进程均未重启。保留上一版带摘要的 JS 文件，兼容尚未刷新的页面。
+
+公网 5 组检查通过：全部静态资源摘要一致；确认密码为空及不一致时阻止请求；一致时使用原注册请求结构；模式切换清空密码和错误；390px 无横向溢出。公网成功提交检查在浏览器拦截注册请求，没有新增真实账号；真正注册成功已在本地隔离库验证。公网窄屏截图已视觉复核。
+
+切换前数据库一致性备份通过，切换前后全部表一致；公网验收后再次核对，发布开始时现存的 6 个项目和业务表保持一致，仅游客会话/工作区随页面初始化增加。环境文件、既有 10 个容器不变，应用/执行器/公网健康检查均为 200，真实模型调用为 0。
+
+- [本次发布回执](registration-confirmation-release-20261113.json)
+- [公网表单验证](../artifacts/registration-confirmation-20261113T145942Z/public-verification.json)、[发布后数据核对](../artifacts/registration-confirmation-20261113T145942Z/final-verification.json)
