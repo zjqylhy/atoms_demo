@@ -123,6 +123,7 @@ type ArtifactAssertion struct {
 	Requirement string `json:"requirement"`
 	Expected    string `json:"expected,omitempty"`
 	Member      string `json:"member,omitempty"`
+	MemberMatch string `json:"member_match,omitempty"`
 	Count       int    `json:"count,omitempty"`
 }
 type OutputDeclaration struct {

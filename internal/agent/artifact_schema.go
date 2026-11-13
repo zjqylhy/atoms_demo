@@ -8,12 +8,13 @@ func objectList(fields map[string]any, required ...string) map[string]any {
 }
 func assertionsProp() map[string]any {
 	return objectList(map[string]any{
-		"path":        prop("string", "核对的文件相对路径"),
-		"kind":        map[string]any{"type": "string", "enum": []string{"nonempty", "text_contains", "json_equals", "archive_count", "archive_text_contains", "archive_xml_contains"}, "description": "archive_count 必填 member/count；归档内容检查必填 member/expected；archive_xml_contains 只匹配元素文字，XML 属性用 archive_text_contains"},
-		"requirement": prop("string", "对应计划验收条件的原文"),
-		"expected":    prop("string", "期望内容；JSON 比较填写完整 JSON 文本"),
-		"member":      prop("string", "归档成员名称或 glob 模式；XML 检查提取实际文本后匹配"),
-		"count":       prop("integer", "archive_count 期望成员数量"),
+		"path":         prop("string", "核对的文件相对路径"),
+		"kind":         map[string]any{"type": "string", "enum": []string{"nonempty", "text_contains", "text_not_contains", "json_equals", "archive_count", "archive_text_contains", "archive_text_not_contains", "archive_xml_contains", "archive_xml_not_contains"}, "description": "archive_count 必填 member/count；归档内容检查必填 member/expected；archive_xml_* 只检查元素文字，XML 属性用 archive_text_*。*_not_contains 要求所有选中内容都不包含 expected，不能用正向断言失败代替；归档零匹配仍失败"},
+		"requirement":  prop("string", "对应计划验收条件的原文，逐字一致；同一条件可对应多条断言，不要改写条件措辞"),
+		"expected":     prop("string", "包含或不得包含的内容，不得为空；JSON 比较填写完整 JSON 文本"),
+		"member":       prop("string", "归档成员选择器；由 member_match 指定名称或通配模式"),
+		"member_match": map[string]any{"type": "string", "enum": []string{"exact", "glob"}, "description": "归档成员匹配方式：exact 按完整名称匹配，名称含 [ ] * ? 时也按字面处理；glob 为通配模式，默认 glob。具体文件建议明确指定 exact"},
+		"count":        prop("integer", "archive_count 期望成员数量"),
 	}, "path", "kind", "requirement")
 }
 func outputsProp() map[string]any {
