@@ -207,6 +207,14 @@ func (e *Engine) Start(owner, id, text, mode, requestID, action, decisionID stri
 			p.Epoch++
 			return nil
 		})
+		if demoFailure(failure) {
+			if _, err := e.Store.InstallFallback(owner, id, runID, demoTemplate(text), e.Config.Redact(failure.Error())); err != nil && !errors.Is(err, core.ErrStale) {
+				_, _ = e.Store.Mutate(owner, id, nil, func(p *core.Project) error {
+					p.Event("fallback_unavailable", "system", "原需求未完成；演示副本创建失败，可从首页打开预置示例", nil)
+					return nil
+				})
+			}
+		}
 		e.mu.Lock()
 		delete(e.active, id)
 		e.mu.Unlock()
@@ -261,9 +269,10 @@ func (e *Engine) load(s scope) (*core.Project, *core.Task, *core.Frame, error) {
 
 func (e *Engine) runFrame(ctx context.Context, s scope) (string, error) {
 	const maxFormatRetries = 5
-	const maxTPMRetries = 2
 	formatRetries := 0
-	tpmRetries := 0
+	transportRetries := 0
+	generator := e.Model
+	backupUsed := false
 	lastInstructionVersion := 0
 nextAction:
 	for {
@@ -290,7 +299,9 @@ nextAction:
 		}
 		version := len(t.InstructionMessages)
 		if version != lastInstructionVersion {
-			formatRetries, tpmRetries = 0, 0
+			formatRetries, transportRetries = 0, 0
+			generator = e.Model
+			backupUsed = false
 			lastInstructionVersion = version
 		}
 		if handled, err := e.recoverExternal(ctx, s, p); err != nil {
@@ -395,11 +406,22 @@ nextAction:
 		generate := func() (core.ModelMessage, core.Usage, error) {
 			callCtx, cancel := e.modelContext(ctx, f)
 			defer cancel()
-			return e.Model.Generate(callCtx, fullFrameContext(p, t, f), tools)
+			return generator.Generate(callCtx, fullFrameContext(p, t, f), tools)
 		}
 		var prepared preparedContext
 		reserveTokens := 0
-		if client, ok := e.Model.(*model.Client); ok {
+		if client, ok := generator.(*model.Client); ok {
+			if configErr := client.Config.ModelError(); configErr != nil {
+				if backup, available := e.Config.Backup(); available && !backupUsed {
+					generator = model.New(backup)
+					backupUsed = true
+					if err := e.noteWait(s, "model_backup", f.Role, "主模型配置不可用，使用已配置的备用通道"); err != nil {
+						return "", err
+					}
+					continue
+				}
+				return "", &model.ServiceError{Message: configErr.Error()}
+			}
 			prepared, err = prepareFrameContext(client, p, t, f, tools)
 			if err != nil {
 				return "", err
@@ -455,29 +477,27 @@ nextAction:
 		if reply.discarded {
 			continue
 		}
-		var throttle *model.TPMThrottleError
-		if errors.As(err, &throttle) {
-			if tpmRetries < maxTPMRetries && p.Runs[s.Run].Calls+1 < e.Config.MaxCalls {
-				tpmRetries++
-				wait := throttle.RetryAfter
-				if e.Config.ProviderTPM > 0 {
-					// The refill estimate covers the full reservation when the gateway bucket is empty.
-					refill := time.Duration(float64(time.Minute) * float64(reserveTokens) / float64(e.Config.ProviderTPM))
-					wait = max(wait, refill)
-				}
-				if wait <= 0 {
-					wait = time.Second
-				}
-				if err := e.noteWait(s, "model_wait", f.Role, fmt.Sprintf("网关每分钟 Token 额度不足，等待后重试（%d/%d）", tpmRetries, maxTPMRetries)); err != nil {
-					return "", err
-				}
-				if err := e.waitForModel(ctx, f, wait); err != nil {
-					return "", err
-				}
-				continue
+		if wait, retry := transportRetry(err, transportRetries, reserveTokens, e.Config); retry && !backupUsed && p.Runs[s.Run].Calls+1 < e.Config.MaxCalls {
+			transportRetries++
+			if err := e.noteWait(s, "model_wait", f.Role, fmt.Sprintf("模型服务暂不可用，等待后重试（第 %d 次）", transportRetries)); err != nil {
+				return "", err
 			}
-		} else {
-			tpmRetries = 0
+			if err := e.waitForModel(ctx, f, wait); err != nil {
+				return "", err
+			}
+			continue
+		}
+		if reply.failure != nil && model.CanBackup(reply.failure) && !backupUsed && p.Runs[s.Run].Calls+1 < e.Config.MaxCalls {
+			if backup, available := e.Config.Backup(); available {
+				if _, realClient := generator.(*model.Client); realClient {
+					generator = model.New(backup)
+					backupUsed = true
+					if err := e.noteWait(s, "model_backup", f.Role, "使用已配置的备用模型通道，调用继续计入同一额度"); err != nil {
+						return "", err
+					}
+					continue
+				}
+			}
 		}
 		if reply.formatRepair {
 			formatRetries++
@@ -496,7 +516,9 @@ nextAction:
 			continue
 		}
 		// A valid reply ends this action's repair sequence. Run.FormatRepairs remains cumulative.
-		formatRetries = 0
+		formatRetries, transportRetries = 0, 0
+		generator = e.Model
+		backupUsed = false
 	}
 }
 

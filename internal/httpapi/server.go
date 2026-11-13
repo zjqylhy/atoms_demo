@@ -41,6 +41,11 @@ func New(s *store.Store, e *agent.Engine, c config.Config) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { send(w, 200, map[string]any{"ok": true}) })
 	mux.HandleFunc("GET /api/bootstrap", app.bootstrap)
+	mux.HandleFunc("GET /api/catalog", app.catalog)
+	mux.HandleFunc("POST /api/catalog/{template}/copy", app.copyPreset)
+	mux.HandleFunc("GET /api/shares/{token}", app.publicShare)
+	mux.HandleFunc("GET /api/shares/{token}/{view}", app.publicShare)
+	mux.HandleFunc("POST /api/shares/{token}/copy", app.copyShare)
 	mux.HandleFunc("GET /api/auth/me", app.bootstrap)
 	mux.HandleFunc("POST /api/auth/register", app.authenticate)
 	mux.HandleFunc("POST /api/auth/login", app.authenticate)
@@ -58,6 +63,9 @@ func New(s *store.Store, e *agent.Engine, c config.Config) http.Handler {
 	mux.HandleFunc("GET /api/projects/{id}/app-state", app.appState)
 	mux.HandleFunc("PUT /api/projects/{id}/app-state", app.appState)
 	mux.HandleFunc("GET /api/projects/{id}/app-backups", app.appBackups)
+	mux.HandleFunc("GET /api/projects/{id}/shares", app.shares)
+	mux.HandleFunc("POST /api/projects/{id}/shares", app.shares)
+	mux.HandleFunc("DELETE /api/projects/{id}/shares/{share}", app.shares)
 	mux.HandleFunc("GET /api/projects/{id}/events", app.events)
 	mux.HandleFunc("/", app.static)
 	return app.sessionMiddleware(mux)
@@ -321,6 +329,31 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		files[name] = data
+	}
+	var contract *core.AppContract
+	if data, ok := files[core.AppContractPath]; ok {
+		parsed, err := core.ParseAppContract(data)
+		if err != nil {
+			s.fail(w, 400, err)
+			return
+		}
+		contract = &parsed
+	}
+	markup := core.PreviewHTML(p.Reports, manifest)
+	if r.URL.Query().Get("format") == "html" {
+		if markup == "" {
+			s.fail(w, 409, errors.New("此版本没有已构建网页，请先运行检查"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="atoms-app.html"`)
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = io.WriteString(w, appruntime.Offline(markup, contract))
+		return
+	}
+	if markup != "" {
+		files["atoms-standalone.html"] = []byte(appruntime.Offline(markup, contract))
+		files["ATOMS-EXPORT.txt"] = []byte("源码及构建网页导出。atoms-standalone.html 可直接打开，无需安装依赖。默认仅带应用种子数据，不包含服务端业务记录。离线修改不会同步服务端，请用页面的数据 JSON 导出/导入功能备份。")
 	}
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "atoms-project.zip"}))

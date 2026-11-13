@@ -18,6 +18,8 @@ func (s *Store) migrate() error {
 		`CREATE INDEX IF NOT EXISTS preview_grant_session ON preview_grants(session_hash)`,
 		`CREATE TABLE IF NOT EXISTS app_receipts (project_id TEXT NOT NULL, request_id TEXT NOT NULL, request_hash TEXT NOT NULL, revision INTEGER NOT NULL, created INTEGER NOT NULL, PRIMARY KEY(project_id,request_id))`,
 		`CREATE TABLE IF NOT EXISTS app_backups (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, schema_version INTEGER NOT NULL, revision INTEGER NOT NULL, value BLOB NOT NULL, created TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS project_copies (session_hash TEXT NOT NULL, request_id TEXT NOT NULL, source TEXT NOT NULL, project_id TEXT NOT NULL, PRIMARY KEY(session_hash,request_id))`,
+		`CREATE TABLE IF NOT EXISTS share_links (id TEXT PRIMARY KEY, token_hash TEXT UNIQUE NOT NULL, project_id TEXT NOT NULL, version_id TEXT NOT NULL, title TEXT NOT NULL, created TEXT NOT NULL, revoked_at TEXT NOT NULL DEFAULT '')`,
 	} {
 		if _, err = tx.Exec(statement); err != nil {
 			return err

@@ -9,6 +9,17 @@ const AppContractPath = "atoms.app.json"
 const AppRuntimePath = "atoms-runtime.js"
 const MaxAppStateBytes = 256 * 1024
 
+type ProjectSource struct {
+	Kind     string `json:"kind"`
+	Template string `json:"template,omitempty"`
+	Version  int    `json:"version,omitempty"`
+}
+type DemoRecovery struct {
+	RunID     string `json:"run_id"`
+	ProjectID string `json:"project_id"`
+	Reason    string `json:"reason"`
+}
+
 // AppContract declares the format of business data, independently of code versions.
 type AppContract struct {
 	API     int             `json:"api_version"`
@@ -33,7 +44,7 @@ func ValidateAppValue(data []byte) error {
 }
 
 func (p *Project) PreviewFiles(version string) (Manifest, []Report, error) {
-	if version == "" {
+	if version == "" || version == "draft" {
 		return p.Files, p.Reports, nil
 	}
 	for _, v := range p.Versions {

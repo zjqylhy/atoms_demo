@@ -157,7 +157,7 @@ func (c *Client) GeneratePrepared(ctx context.Context, request PreparedRequest, 
 
 func (c *Client) complete(ctx context.Context, request PreparedRequest) (core.ModelMessage, core.Usage, error) {
 	if e := c.Config.ModelError(); e != nil {
-		return core.ModelMessage{}, core.Usage{}, e
+		return core.ModelMessage{}, core.Usage{}, &ServiceError{Message: e.Error()}
 	}
 	if e := c.ValidateRequest(request); e != nil {
 		return core.ModelMessage{}, core.Usage{}, e
@@ -170,12 +170,15 @@ func (c *Client) complete(ctx context.Context, request PreparedRequest) (core.Mo
 	req.Header.Set("Content-Type", "application/json")
 	resp, e := c.HTTP.Do(req)
 	if e != nil {
-		return core.ModelMessage{}, core.Usage{}, fmt.Errorf("模型请求失败：%s", c.Config.Redact(e.Error()))
+		if ctx.Err() != nil {
+			return core.ModelMessage{}, core.Usage{}, ctx.Err()
+		}
+		return core.ModelMessage{}, core.Usage{}, &ServiceError{Message: fmt.Sprintf("模型请求失败：%s", c.Config.Redact(e.Error())), Retryable: true}
 	}
 	defer resp.Body.Close()
 	body, e := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024+1))
 	if e != nil {
-		return core.ModelMessage{}, core.Usage{}, e
+		return core.ModelMessage{}, core.Usage{}, &ServiceError{Message: "模型响应读取失败", Retryable: true}
 	}
 	if len(body) > 2*1024*1024 {
 		return core.ModelMessage{}, core.Usage{}, errors.New("模型响应超过安全大小限制")
@@ -204,7 +207,8 @@ func (c *Client) complete(ctx context.Context, request PreparedRequest) (core.Mo
 		if detail == "" {
 			detail = "上游未返回可识别错误"
 		}
-		return core.ModelMessage{}, core.Usage{}, fmt.Errorf("模型服务 HTTP %d：%s", resp.StatusCode, c.Config.Redact(detail))
+		budget := er.Error.Code == "insufficient_quota" || er.Error.Code == "budget_exceeded" || er.Error.Reason == "daily_quota" || er.Error.Reason == "account_budget"
+		return core.ModelMessage{}, core.Usage{}, &ServiceError{Status: resp.StatusCode, Message: fmt.Sprintf("模型服务 HTTP %d：%s", resp.StatusCode, c.Config.Redact(detail)), Budget: budget, RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After")), Retryable: !budget && (resp.StatusCode == 429 || resp.StatusCode == 502 || resp.StatusCode == 503 || resp.StatusCode == 504)}
 	}
 	var wire struct {
 		Choices []struct {

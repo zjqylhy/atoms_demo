@@ -31,6 +31,8 @@ import remarkGfm from "remark-gfm";
 import { diffLines } from "diff";
 import { AccountMenu, type Account } from "./components/AccountMenu";
 import { AppPreview } from "./components/AppPreview";
+import { Catalog } from "./components/Catalog";
+import { SharePanel } from "./components/SharePanel";
 
 type FileInfo = {
   hash: string;
@@ -74,6 +76,9 @@ type Message = { id: string; role: string; text: string; kind: string };
 type ActivityEvent = { seq: number; kind: string; role?: string; text: string; at: string };
 type Process = { start: number; entries: (Message | ActivityEvent)[] };
 type Project = {
+  source?: {kind:string;template?:string};
+  recovery?: {project_id:string;run_id:string;reason:string};
+  head?: string;
   preview_ready?: boolean;
   id: string;
   title: string;
@@ -884,7 +889,7 @@ export default function App() {
         <div className="sidebar-bottom">
           <div className="availability">
             <i className={boot?.model_ready ? "green" : ""} />
-            {boot?.model_ready ? "模型服务已配置" : "模型服务待配置"}
+            {boot?.model_ready ? "模型服务已配置" : "演示可用 · 模型服务待配置"}
           </div>
           <div className="profile">
             <span>L</span>
@@ -973,6 +978,7 @@ export default function App() {
               <br className="small-only" /> Products out<span>.</span>
             </h1>
             <p className="intro">和你的 AI 团队一起，把想法变成真正的作品。</p>
+            <Catalog csrf={boot?.csrf||''} onOpen={async id=>{await list();await open(id);setPane('work');setTab('preview');}}/>
             {composer}
             <div className="mode-explain">
               <Sparkles size={14} />
@@ -1028,6 +1034,9 @@ export default function App() {
                 产物工作区 <span>{files.length}</span>
               </button>
             </div>
+            {project.source && <div className="source-banner">{project.source.kind==='fallback'?'演示模式 · 原需求尚未完成，只提供预置功能':'预置示例副本 · 可交互、可保存，可继续提出修改要求'}</div>}
+            {project.recovery && <div className="source-banner">演示应用已就绪，原需求尚未完成。<button onClick={async()=>{await list();await open(project.recovery!.project_id);setPane('work');setTab('preview');}}>打开演示应用</button></div>}
+            {task?.status==='failed' && project.head && <div className="source-banner">本次修改未完成，之前的成功版本和应用数据已保留。<button onClick={()=>{setVersion(project.head!);setPath('index.html');setPane('work');setTab('preview');}}>查看上一可用版本</button></div>}
             <div className={"workspace show-" + pane}>
               <section className="conversation">
                 <div className="conversation-heading">
@@ -1216,6 +1225,8 @@ export default function App() {
                     >
                       <Download size={17} />
                     </a>
+                    <a className="share-button" href={`/api/projects/${project.id}/export?version=${version}&format=html`}>下载 HTML</a>
+                    <SharePanel key={project.id} projectId={project.id} version={version} csrf={boot!.csrf}/>
                   </div>
                 </div>
                 <div className="artifact-meta">

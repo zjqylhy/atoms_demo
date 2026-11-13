@@ -12,6 +12,7 @@ import (
 const defaultMaxRequestBytes = 500 * 1024
 
 type Config struct {
+	BackupBaseURL, BackupModel, BackupAPIKey                                 string
 	TrustProxy                                                               bool
 	ProviderTPM                                                              int
 	ToolMode                                                                 string
@@ -40,6 +41,9 @@ func number(k string, d int) int {
 }
 func Load() Config {
 	return Config{
+		BackupBaseURL:        strings.TrimRight(os.Getenv("ATOMS_BACKUP_LLM_BASE_URL"), "/"),
+		BackupModel:          os.Getenv("ATOMS_BACKUP_LLM_MODEL"),
+		BackupAPIKey:         os.Getenv("ATOMS_BACKUP_LLM_API_KEY"),
 		TrustProxy:           os.Getenv("ATOMS_TRUST_PROXY") == "1",
 		ProviderTPM:          number("ATOMS_LLM_TPM", 40000),
 		ToolMode:             env("ATOMS_LLM_TOOL_MODE", "native"),
@@ -103,10 +107,21 @@ func (c Config) Ref() core.ModelConfigRef {
 	return core.ModelConfigRef{Protocol: c.Protocol, BaseURL: c.BaseURL, Model: c.Model, Revision: c.Revision, ToolMode: c.ToolMode}
 }
 func (c Config) Redact(s string) string {
-	for _, secret := range []string{c.APIKey, c.RunnerToken} {
+	for _, secret := range []string{c.APIKey, c.BackupAPIKey, c.RunnerToken} {
 		if secret != "" {
 			s = strings.ReplaceAll(s, secret, "[REDACTED]")
 		}
 	}
 	return s
+}
+
+// The backup uses the same wire/tool protocol; switching cannot reinterpret an
+// existing conversation. It has no independent allowance or larger budget.
+func (c Config) Backup() (Config, bool) {
+	b := c
+	b.BaseURL = c.BackupBaseURL
+	b.Model = c.BackupModel
+	b.APIKey = c.BackupAPIKey
+	b.Revision = c.Revision + ":backup"
+	return b, b.ModelError() == nil
 }

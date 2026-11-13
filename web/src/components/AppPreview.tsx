@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 
 type AppState = {schema_version:number; revision:number; value:Record<string,unknown>};
 type Access = {mode:string; grant?:string; version:string; contract?:{schema_version:number; initial_state:Record<string,unknown>}; state?:AppState};
-export function AppPreview({projectId,version,csrf}:{projectId:string;version:string;csrf:string}) {
+export function AppPreview({projectId,version,csrf,sharedToken}:{projectId:string;version:string;csrf:string;sharedToken?:string}) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [instance] = useState(() => crypto.randomUUID());
   const [access,setAccess] = useState<Access>();
@@ -15,7 +15,7 @@ export function AppPreview({projectId,version,csrf}:{projectId:string;version:st
   const active = useRef(true);
   const pending = useRef(false);
   const receipts = useRef(new Map<string,{hash:string;revision:number}>());
-  const base = `/api/projects/${projectId}`;
+  const base = sharedToken ? `/api/shares/${encodeURIComponent(sharedToken)}` : `/api/projects/${projectId}`;
   async function api(path:string,init:RequestInit={}) {
     const response = await fetch(base+path,{...init,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,...init.headers}});
     const body = await response.json();
@@ -23,7 +23,7 @@ export function AppPreview({projectId,version,csrf}:{projectId:string;version:st
     return body;
   }
   async function grant(expectedVersion?:string) {
-    const value:Access = await api('/preview-access',{method:'POST',body:JSON.stringify({version})});
+    const value:Access = sharedToken ? await api('') : await api('/preview-access',{method:'POST',body:JSON.stringify({version})});
     if (!active.current) throw new Error('预览已关闭');
     if(expectedVersion && (value.mode!=='formal' || value.version!==expectedVersion)) throw new Error('当前交付版本已改变，请刷新预览');
     current.current = value; setAccess(value);
@@ -104,7 +104,7 @@ export function AppPreview({projectId,version,csrf}:{projectId:string;version:st
           const file=event.target.files?.[0];event.target.value='';if(!file)return;
           try {if(file.size>270000)throw new Error('文件超过大小限制');const value=JSON.parse(await file.text()) as AppState;
             if(value.schema_version!==access.contract!.schema_version)throw new Error('导入的数据格式版本不兼容');
-            if(!confirm('导入将替换当前应用数据，服务端会保留最近 3 次导入前备份。确认继续？'))return;
+            if(!confirm(access.mode==='formal'?'导入将替换当前应用数据，服务端会保留最近 3 次导入前备份。确认继续？':'导入将替换当前试用数据，请先导出需要保留的内容。确认继续？'))return;
             const before=await load();await save(value.value,before.revision,crypto.randomUUID(),true);setReload(n=>n+1);
           }catch(error){setStatus((error as Error).message);setProblem(true);}
         }}/></label></>}

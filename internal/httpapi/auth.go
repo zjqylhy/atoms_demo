@@ -73,7 +73,8 @@ func (s *Server) sessionMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		publicCatalog := r.Method == "GET" && (r.URL.Path == "/api/catalog" || strings.HasPrefix(r.URL.Path, "/api/catalog/"))
-		if !strings.HasPrefix(r.URL.Path, "/api/") || publicCatalog {
+		publicShare := r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/shares/")
+		if !strings.HasPrefix(r.URL.Path, "/api/") || publicCatalog || publicShare {
 			next.ServeHTTP(w, r)
 			return
 		}
