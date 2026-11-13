@@ -4,7 +4,7 @@
 
 [演示站](https://atoms.linhengyi.xyz/) · [源码](https://github.com/zjqylhy/atoms_demo) · [本次验收记录](docs/login-required-project-deletion-validation.md)
 
-**2026-11-13：当前分支已完成必须登录、登录后全局共享和历史项目删除，已通过本地隔离验证，尚未部署。** 此前发布记录 `20261113T125035Z` 见 [实施记录](docs/implementation-status.md)，不代表本轮功能已上线。
+**2026-11-13：必须登录、登录后全局共享和历史项目删除已上线，版本 `20261113T143142Z`。** 公网桌面/390px 登录、跨账号保存与删除验证通过，9 个历史项目及原有文件、数据和额度保留。详见 [发布回执](docs/login-required-project-deletion-release-20261113.json) 和 [实施记录](docs/implementation-status.md)。
 
 ## 直接启动，无需模型 Key
 
