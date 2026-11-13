@@ -8,6 +8,7 @@ import (
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/compose"
 	"github.com/cloudwego/eino/schema"
+	"mockatoms/internal/appruntime"
 	"mockatoms/internal/core"
 	"mockatoms/internal/model"
 	"mockatoms/internal/validation"
@@ -54,7 +55,7 @@ func definitions(role string) []model.Tool {
 			def("replace_text", "按旧摘要精确替换，匹配次数必须等于 expected_count", map[string]any{"path": prop("string", "文件路径"), "old_hash": prop("string", "文件当前摘要"), "old_text": prop("string", "待替换文字"), "new_text": prop("string", "新文字"), "expected_count": prop("integer", "预期匹配次数")}, "path", "old_hash", "old_text", "new_text", "expected_count"),
 			def("delete_file", "只从当前草稿中移除文件，保留历史", map[string]any{"path": prop("string", "路径"), "old_hash": prop("string", "文件当前摘要")}, "path", "old_hash"),
 			def("run_project", "在隔离环境真实构建网页、运行 JavaScript/TypeScript/Python 脚本或编译并测试 Go 模块。kind=go 时使用 go.mod；kind=script 必填 expected_stdout，输入目录 /workspace/project 只读，当前工作目录 /workspace/scratch 可写。输出用当前目录相对路径，不写源码目录；输入相对 __file__ 读取。生成文件必须用 outputs 声明回收；assertions 对回收字节做内容验收，stdout 不能代替内容验收", map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"web", "script", "go"}}, "entry": prop("string", "网页 index.html、脚本相对路径或根目录 go.mod"), "args": listProp("string"), "expected_stdout": prop("string", "kind=script 必填，去除首尾空白后精确比较；其他类型省略"), "outputs": outputsProp(), "assertions": assertionsProp()}, "kind", "entry"),
-			def("test_preview", "隔离浏览器执行需求对应的交互断言；至少一个断言，禁止自定义 JS", map[string]any{"entry": prop("string", "网页入口，默认 index.html"), "steps": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string", "enum": []string{"click", "fill", "select", "check", "expect_text", "expect_count", "expect_visible"}}, "selector": prop("string", "CSS 选择器"), "value": prop("string", "输入或期望文本"), "count": prop("integer", "期望数量"), "requirement": prop("string", "对应用户需求或计划验收项"), "paths": listProp("string")}, "required": []string{"action", "selector", "requirement"}, "additionalProperties": false}}}, "steps"))
+			def("test_preview", "隔离浏览器执行需求对应的交互断言；至少一个断言，禁止自定义 JS", map[string]any{"entry": prop("string", "网页入口，默认 index.html"), "steps": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string", "enum": []string{"click", "fill", "select", "check", "expect_text", "expect_count", "expect_visible", "reload", "expect_saved"}}, "selector": prop("string", "CSS 选择器"), "value": prop("string", "输入或期望文本"), "count": prop("integer", "期望数量"), "requirement": prop("string", "对应用户需求或计划验收项"), "paths": listProp("string")}, "required": []string{"action", "selector", "requirement"}, "additionalProperties": false}}}, "steps"))
 	case "David":
 		all = append(all, def("write_document", "保存分析报告 Markdown", writes, "path", "content", "old_hash"),
 			def("analyze_table", "对用户原始 CSV/JSON 执行真实统计并保存结果 CSV；聚合结果固定列名 group,value，分别为分组和数值，可直接交付并生成图表，不要手工改写", map[string]any{"source": prop("string", "只读输入文件路径"), "group_by": prop("string", "分组字段，可为空"), "value": prop("string", "运算字段，count 可为空"), "operation": map[string]any{"type": "string", "enum": []string{"select", "count", "sum", "mean", "min", "max"}}, "output": prop("string", "结果 CSV 路径"), "filter_column": prop("string", "可选筛选字段"), "filter_value": prop("string", "等值筛选值"), "select_columns": listProp("string"), "sort_by": prop("string", "输出排序字段，聚合结果为 group 或 value"), "sort_order": map[string]any{"type": "string", "enum": []string{"asc", "desc"}}, "sort_numeric": prop("boolean", "select 模式是否按数值排序")}, "source", "group_by", "value", "operation", "output"),
@@ -152,6 +153,14 @@ func kind(name string) string {
 	return "text"
 }
 func write(p *core.Project, name, content, oldHash string, documentOnly bool) error {
+	if name == core.AppRuntimePath {
+		return errors.New("平台数据运行库为只读文件，不可覆盖")
+	}
+	if name == core.AppContractPath {
+		if _, err := core.ParseAppContract([]byte(content)); err != nil {
+			return err
+		}
+	}
 	if _, err := core.FilePath(name); err != nil {
 		return err
 	}
@@ -322,9 +331,16 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 			return fail(errors.New("批准前的规划文档必须保存在 planning/ 目录"))
 		}
 		hash := core.Hash([]byte(content))
-		return e.record(s, c, map[string][]byte{hash: []byte(content)}, func(p *core.Project) (any, error) {
+		blobs := map[string][]byte{hash: []byte(content)}
+		if name == core.AppContractPath {
+			blobs[core.Hash([]byte(appruntime.SDK))] = []byte(appruntime.SDK)
+		}
+		return e.record(s, c, blobs, func(p *core.Project) (any, error) {
 			if err := write(p, name, content, str(a, "old_hash"), c.Function.Name == "write_document"); err != nil {
 				return nil, err
+			}
+			if name == core.AppContractPath {
+				p.Files[core.AppRuntimePath] = core.File{Hash: core.Hash([]byte(appruntime.SDK)), Size: len(appruntime.SDK), Kind: "code", ReadOnly: true}
 			}
 			rememberFile(p, s, c, name, content)
 			return map[string]any{"path": name, "hash": hash, "saved": true}, nil

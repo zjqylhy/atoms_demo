@@ -30,6 +30,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { diffLines } from "diff";
 import { AccountMenu, type Account } from "./components/AccountMenu";
+import { AppPreview } from "./components/AppPreview";
 
 type FileInfo = {
   hash: string;
@@ -1342,11 +1343,9 @@ export default function App() {
                       <div
                         className={"preview-wrap " + (mobile ? "mobile" : "")}
                       >
-                        <iframe
-                          title="生成产物预览"
-                          sandbox="allow-scripts allow-forms"
-                          key={`${version}-${refresh}-${files.map(name => name + manifest[name]?.hash).join("|")}`}
-                          src={`/api/projects/${project.id}/preview?version=${version}`}
+                        <AppPreview
+                          key={`${project.id}-${boot!.csrf}-${version}-${refresh}-${files.map(name => name + manifest[name]?.hash).join("|")}`}
+                          projectId={project.id} version={version} csrf={boot!.csrf}
                         />
                       </div>
                     ) : path.endsWith(".md") ? (

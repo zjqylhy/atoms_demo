@@ -13,6 +13,11 @@ func (s *Store) migrate() error {
 		`CREATE TABLE IF NOT EXISTS workspace_accounts (workspace_id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), created TEXT NOT NULL)`,
 		`CREATE INDEX IF NOT EXISTS workspace_account_user ON workspace_accounts(user_id)`,
 		`CREATE TABLE IF NOT EXISTS auth_attempts (bucket TEXT PRIMARY KEY, window_at INTEGER NOT NULL, attempts INTEGER NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS app_states (project_id TEXT PRIMARY KEY REFERENCES projects(id), schema_version INTEGER NOT NULL, revision INTEGER NOT NULL, value BLOB NOT NULL, updated TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS preview_grants (token_hash TEXT PRIMARY KEY, session_hash TEXT NOT NULL, project_id TEXT NOT NULL, version_id TEXT NOT NULL, schema_version INTEGER NOT NULL, expires_at INTEGER NOT NULL)`,
+		`CREATE INDEX IF NOT EXISTS preview_grant_session ON preview_grants(session_hash)`,
+		`CREATE TABLE IF NOT EXISTS app_receipts (project_id TEXT NOT NULL, request_id TEXT NOT NULL, request_hash TEXT NOT NULL, revision INTEGER NOT NULL, created INTEGER NOT NULL, PRIMARY KEY(project_id,request_id))`,
+		`CREATE TABLE IF NOT EXISTS app_backups (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, schema_version INTEGER NOT NULL, revision INTEGER NOT NULL, value BLOB NOT NULL, created TEXT NOT NULL)`,
 	} {
 		if _, err = tx.Exec(statement); err != nil {
 			return err

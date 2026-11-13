@@ -8,6 +8,7 @@ import (
 	"io"
 	"mime"
 	"mockatoms/internal/agent"
+	"mockatoms/internal/appruntime"
 	"mockatoms/internal/config"
 	"mockatoms/internal/core"
 	"mockatoms/internal/store"
@@ -53,6 +54,10 @@ func New(s *store.Store, e *agent.Engine, c config.Config) http.Handler {
 	mux.HandleFunc("GET /api/projects/{id}/files", app.file)
 	mux.HandleFunc("GET /api/projects/{id}/export", app.export)
 	mux.HandleFunc("GET /api/projects/{id}/preview", app.preview)
+	mux.HandleFunc("POST /api/projects/{id}/preview-access", app.previewAccess)
+	mux.HandleFunc("GET /api/projects/{id}/app-state", app.appState)
+	mux.HandleFunc("PUT /api/projects/{id}/app-state", app.appState)
+	mux.HandleFunc("GET /api/projects/{id}/app-backups", app.appBackups)
 	mux.HandleFunc("GET /api/projects/{id}/events", app.events)
 	mux.HandleFunc("/", app.static)
 	return app.sessionMiddleware(mux)
@@ -345,6 +350,9 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 	if markup == "" {
 		s.fail(w, 404, errors.New("尚未生成可预览构建，请查看文件或继续执行"))
 		return
+	}
+	if _, ok := manifest[core.AppContractPath]; ok {
+		markup = appruntime.Inject(markup)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")

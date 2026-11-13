@@ -1,5 +1,6 @@
 const http = require("node:http");
 const { chromium } = require("playwright");
+const { appHost } = require('./app-host.cjs');
 const CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts allow-forms";
 async function checkBrowser(
@@ -7,7 +8,7 @@ async function checkBrowser(
   p,
   test,
   check,
-  { inputPaths = [], launchOptions = {} } = {},
+  { inputPaths = [], launchOptions = {}, initialState = {} } = {},
 ) {
   const steps = p.steps || [];
   if (test) {
@@ -46,6 +47,8 @@ async function checkBrowser(
           "expect_text",
           "expect_count",
           "expect_visible",
+          "reload",
+          "expect_saved",
         ].includes(s.action)
       )
         throw Error("不支持的测试动作");
@@ -62,11 +65,12 @@ async function checkBrowser(
     }
   }
   const server = http.createServer((req, res) => {
+    const isApp = req.url.startsWith('/app?');
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": CSP,
+      "Content-Security-Policy": isApp ? CSP : "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-src 'self'; connect-src 'none'",
     });
-    res.end(html);
+    res.end(isApp ? html : appHost(initialState));
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const url = `http://127.0.0.1:${server.address().port}`;
@@ -88,7 +92,7 @@ async function checkBrowser(
         acceptDownloads: false,
       });
       await context.route("**/*", (route) =>
-        route.request().url() === url + "/" ? route.continue() : route.abort(),
+        (route.request().url() === url + "/" || route.request().url().startsWith(url + '/app?')) ? route.continue() : route.abort(),
       );
       const page = await context.newPage();
       page.setDefaultTimeout(3500);
@@ -99,12 +103,22 @@ async function checkBrowser(
       });
       await page.goto(url, { waitUntil: "load", timeout: 10000 });
       await page.waitForTimeout(100);
+      let app = page.frames().find(frame => frame.url().startsWith(url+'/app?'));
+      if(!app) throw Error('预览框架未加载');
       check(`startup_${width}`, "Chromium 实际加载完成");
       for (let i = 0; i < steps.length; i++) {
         const s = steps[i];
-        const loc = page.locator(s.selector);
+        const loc = app.locator(s.selector || 'body');
         try {
           switch (s.action) {
+            case "reload":
+              await app.evaluate(() => location.reload());
+              await page.waitForTimeout(100);
+              app = page.frames().find(frame => frame.url().startsWith(url+'/app?'));
+              break;
+            case "expect_saved":
+              await page.waitForFunction(() => window.savedRevision > 0);
+              break;
             case "click":
               await loc.click();
               break;
@@ -163,7 +177,7 @@ async function checkBrowser(
         errors.length ? errors.slice(0, 5).join("\n") : "无页面脚本错误",
         errors.length ? "failed" : "passed",
       );
-      const overflow = await page.evaluate(
+      const overflow = await app.evaluate(
         () => document.documentElement.scrollWidth > innerWidth + 2,
       );
       check(

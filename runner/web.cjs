@@ -173,7 +173,15 @@ async function buildHTML(
     for (const child of node.childNodes || []) await visit(child);
   }
   await visit(doc);
-  const html = serialize(doc);
+  let html = serialize(doc);
+  if (job.files['atoms.app.json']) {
+    const contract = JSON.parse(job.files['atoms.app.json']);
+    if (contract.api_version !== 1 || !Number.isInteger(contract.schema_version) || contract.schema_version < 1 || !contract.initial_state || Array.isArray(contract.initial_state) || typeof contract.initial_state !== 'object') throw Error('应用数据契约无效');
+    const runtime = job.files['atoms-runtime.js'];
+    if (!runtime) throw Error('应用缺少平台数据运行库');
+    dependencies.add('atoms.app.json'); dependencies.add('atoms-runtime.js');
+    html = html.replace('<head>', '<head><script>'+runtime.replace(/<\/script/gi,'<\\/script')+'</script>');
+  }
   if (Buffer.byteLength(html) > 1048576) throw Error("构建后网页超过 1 MiB");
   return {
     html,
