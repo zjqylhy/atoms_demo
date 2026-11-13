@@ -54,3 +54,4 @@ flowchart TD
 - 线上于 2026-11-14 04:24（北京时间）生效：当前任务结束、应用及执行器均空闲后，将 `/etc/atoms-lab/app.env` 的 `ATOMS_RUN_SECONDS` 从 1200 改为 3600，并重启 `atoms-web`。运行中的进程环境、本机及公网 `/api/bootstrap` 均确认 `run_seconds=3600`，健康检查通过。
 - 本次线上仅应用时限配置，沿用版本 `20261113T200035Z`；程序哈希与执行器进程保持不变，重启前后 11 个项目的完整状态一致。已保留环境文件备份 `/etc/atoms-lab/app.env.before-one-hour-20261113T202418Z` 和通过完整性检查的数据库备份 `/opt/atoms_lab/backups/20261113T202418865382Z.db`。
 - 本地应用凭据与公网验证结果分别保存在 `artifacts/run-time-budget-1h-20261114/applied.json`、`artifacts/run-time-budget-1h-20261114/public-verification.json`。没有为本次验证发起模型调用。
+- 04:35（北京时间）后续发布 `20261113T203200Z`，程序默认值也更新为 3600 秒；保留已经生效的线上环境配置。上传后的 Linux 程序使用独立空环境验证默认 1 小时，线上进程与公网接口再次确认 3600 秒，详见[发布记录](json-diagnostics-deployment-20261114.md)。
