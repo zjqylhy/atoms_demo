@@ -1684,3 +1684,13 @@ th {
   .nav-open .sidebar { display: flex; visibility: visible; margin-left: 0; position: fixed; inset: 0 auto 0 0; z-index: 41; width: min(280px, 84vw); }
   .nav-open .nav-backdrop { display: block; position: fixed; inset: 0; z-index: 40; background: #20212766; border: 0; border-radius: 0; }
 }
+
+.account-menu { display:flex;align-items:center;gap:10px;font-size:12px; }
+.account-menu > button { border:1px solid var(--line,#ddd);border-radius:8px;background:transparent;padding:7px 10px;color:inherit; }
+.account-dialog { text-align:left; }
+.account-dialog > label { display:block;margin:14px 0;font-size:13px; }
+.account-dialog input:not([type=checkbox]) { display:block;width:100%;box-sizing:border-box;margin-top:7px;padding:10px;border:1px solid #d5d8d2;border-radius:8px;background:#fff;color:#252c23; }
+.account-dialog .check-option { display:flex;gap:8px;align-items:center; }
+.account-dialog p { font-size:13px;line-height:1.6; }
+.account-dialog .text-button { background:none;border:0;color:#336d42;margin-top:16px; }
+.form-error { color:#a93632; }

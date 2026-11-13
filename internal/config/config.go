@@ -12,6 +12,7 @@ import (
 const defaultMaxRequestBytes = 500 * 1024
 
 type Config struct {
+	TrustProxy                                                               bool
 	ProviderTPM                                                              int
 	ToolMode                                                                 string
 	Addr, DataDir, WebDir, PublicURL                                         string
@@ -39,6 +40,7 @@ func number(k string, d int) int {
 }
 func Load() Config {
 	return Config{
+		TrustProxy:           os.Getenv("ATOMS_TRUST_PROXY") == "1",
 		ProviderTPM:          number("ATOMS_LLM_TPM", 40000),
 		ToolMode:             env("ATOMS_LLM_TOOL_MODE", "native"),
 		Addr:                 env("ATOMS_ADDR", "127.0.0.1:8090"),

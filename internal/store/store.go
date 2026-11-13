@@ -32,7 +32,12 @@ func Open(filename string) (*Store, error) {
 			return nil, e
 		}
 	}
-	return &Store{db: db}, nil
+	s := &Store{db: db}
+	if e = s.migrate(); e != nil {
+		db.Close()
+		return nil, e
+	}
+	return s, nil
 }
 func (s *Store) Close() error { return s.db.Close() }
 func (s *Store) Workspace(token string, create bool) (string, error) {
@@ -46,13 +51,29 @@ func (s *Store) Workspace(token string, create bool) (string, error) {
 	return id, e
 }
 func (s *Store) Create(owner, title string) (*core.Project, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, e := s.db.Begin()
+	if e != nil {
+		return nil, e
+	}
+	defer tx.Rollback()
+	var count int
+	if e = tx.QueryRow(`SELECT COUNT(*) FROM projects WHERE owner=? OR owner IN (SELECT workspace_id FROM workspace_accounts WHERE user_id=(SELECT user_id FROM workspace_accounts WHERE workspace_id=?))`, owner, owner).Scan(&count); e != nil {
+		return nil, e
+	}
+	if count >= 30 {
+		return nil, errors.New("当前账号或游客工作区最多 30 个项目")
+	}
 	p := core.NewProject(owner, title)
 	b, e := json.Marshal(p)
 	if e != nil {
 		return nil, e
 	}
-	_, e = s.db.Exec("INSERT INTO projects VALUES(?,?,?,?,?)", p.ID, p.Owner, p.Title, p.Updated, b)
-	return p, e
+	if _, e = tx.Exec("INSERT INTO projects VALUES(?,?,?,?,?)", p.ID, p.Owner, p.Title, p.Updated, b); e != nil {
+		return nil, e
+	}
+	return p, tx.Commit()
 }
 func decode(b []byte) (*core.Project, error) {
 	var p core.Project
@@ -71,7 +92,7 @@ func (s *Store) Get(owner, id string) (*core.Project, error) {
 	return decode(b)
 }
 func (s *Store) List(owner string) ([]map[string]any, error) {
-	rows, e := s.db.Query("SELECT id,title,updated FROM projects WHERE owner=? ORDER BY updated DESC", owner)
+	rows, e := s.db.Query(`SELECT id,title,updated FROM projects WHERE owner=? OR owner IN (SELECT workspace_id FROM workspace_accounts WHERE user_id=(SELECT user_id FROM workspace_accounts WHERE workspace_id=?)) ORDER BY updated DESC`, owner, owner)
 	if e != nil {
 		return nil, e
 	}
@@ -242,7 +263,7 @@ func (s *Store) ReserveCall(owner string, globalLimit, workspaceLimit int) error
 	defer tx.Rollback()
 	day := time.Now().UTC().Format("2006-01-02")
 	var total, used int
-	if err = tx.QueryRow("SELECT COALESCE(SUM(calls),0),COALESCE(SUM(CASE WHEN owner=? THEN calls ELSE 0 END),0) FROM call_quota WHERE day=?", owner, day).Scan(&total, &used); err != nil {
+	if err = tx.QueryRow(`SELECT COALESCE(SUM(calls),0),COALESCE(SUM(CASE WHEN owner=? OR owner IN (SELECT workspace_id FROM workspace_accounts WHERE user_id=(SELECT user_id FROM workspace_accounts WHERE workspace_id=?)) THEN calls ELSE 0 END),0) FROM call_quota WHERE day=?`, owner, owner, day).Scan(&total, &used); err != nil {
 		return err
 	}
 	if globalLimit > 0 && total >= globalLimit {

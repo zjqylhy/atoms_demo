@@ -68,8 +68,16 @@ func (e *Engine) Start(owner, id, text, mode, requestID, action, decisionID stri
 	if len(e.active) >= e.Config.MaxConcurrent {
 		return nil, errors.New("执行容量已满，请稍后重试")
 	}
+	principal, err := e.Store.Principal(owner)
+	if err != nil {
+		return nil, err
+	}
 	for _, r := range e.active {
-		if r.Owner == owner {
+		other, lookupErr := e.Store.Principal(r.Owner)
+		if lookupErr != nil {
+			return nil, lookupErr
+		}
+		if other == principal {
 			return nil, errors.New("当前工作区已有运行中的任务")
 		}
 	}

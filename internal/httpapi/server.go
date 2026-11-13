@@ -2,8 +2,6 @@ package httpapi
 
 import (
 	"archive/zip"
-	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -42,6 +40,10 @@ func New(s *store.Store, e *agent.Engine, c config.Config) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { send(w, 200, map[string]any{"ok": true}) })
 	mux.HandleFunc("GET /api/bootstrap", app.bootstrap)
+	mux.HandleFunc("GET /api/auth/me", app.bootstrap)
+	mux.HandleFunc("POST /api/auth/register", app.authenticate)
+	mux.HandleFunc("POST /api/auth/login", app.authenticate)
+	mux.HandleFunc("POST /api/auth/logout", app.logout)
 	mux.HandleFunc("GET /api/projects", app.projects)
 	mux.HandleFunc("POST /api/projects", app.projects)
 	mux.HandleFunc("GET /api/projects/{id}", app.project)
@@ -53,7 +55,7 @@ func New(s *store.Store, e *agent.Engine, c config.Config) http.Handler {
 	mux.HandleFunc("GET /api/projects/{id}/preview", app.preview)
 	mux.HandleFunc("GET /api/projects/{id}/events", app.events)
 	mux.HandleFunc("/", app.static)
-	return app.middleware(mux)
+	return app.sessionMiddleware(mux)
 }
 func send(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -78,76 +80,16 @@ func decode(r *http.Request, v any) error {
 	}
 	return nil
 }
-func (s *Server) middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "same-origin")
-		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
-			next.ServeHTTP(w, r)
-			return
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, 3*1024*1024)
-		cookieName := "atoms_session"
-		secure := strings.HasPrefix(s.Config.PublicURL, "https://") || r.TLS != nil
-		if secure {
-			cookieName = "__Host-atoms_session"
-		}
-		cookie, err := r.Cookie(cookieName)
-		if err != nil || len(cookie.Value) != 64 {
-			if r.URL.Path != "/api/bootstrap" {
-				s.fail(w, 401, errors.New("请刷新页面建立工作区"))
-				return
-			}
-			cookie = &http.Cookie{Name: cookieName, Value: core.ID() + core.ID(), Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: 365 * 24 * 3600}
-			http.SetCookie(w, cookie)
-		}
-		id, err := s.Store.Workspace(cookie.Value, r.URL.Path == "/api/bootstrap")
-		if err != nil {
-			s.fail(w, 401, errors.New("工作区会话无效，请清除本站 Cookie 后重新打开"))
-			return
-		}
-		if r.Method != "GET" && r.Method != "HEAD" {
-			origin := r.Header.Get("Origin")
-			validOrigin := "http://" + r.Host
-			if r.TLS != nil {
-				validOrigin = "https://" + r.Host
-			}
-			if origin != "" && origin != validOrigin && origin != s.Config.PublicURL {
-				s.fail(w, 403, errors.New("请求来源无效"))
-				return
-			}
-			if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(csrf(cookie.Value))) != 1 {
-				s.fail(w, 403, errors.New("请求校验失败，请刷新页面"))
-				return
-			}
-			s.mu.Lock()
-			now := time.Now()
-			limit := s.rates[id]
-			if now.Sub(limit.At) > time.Minute {
-				limit = window{At: now}
-			}
-			limit.Count++
-			s.rates[id] = limit
-			for key, item := range s.rates {
-				if now.Sub(item.At) > 2*time.Minute {
-					delete(s.rates, key)
-				}
-			}
-			s.mu.Unlock()
-			if limit.Count > 60 {
-				s.fail(w, 429, errors.New("操作过于频繁，请稍后重试"))
-				return
-			}
-		}
-		r = r.WithContext(context.WithValue(r.Context(), ctxKey("owner"), id))
-		r = r.WithContext(context.WithValue(r.Context(), ctxKey("csrf"), csrf(cookie.Value)))
-		next.ServeHTTP(w, r)
-	})
-}
 func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	ready := s.Config.ModelError() == nil
-	send(w, 200, map[string]any{"csrf": r.Context().Value(ctxKey("csrf")), "model_ready": ready, "runner_configured": s.Config.RunnerURL != "" && s.Config.RunnerToken != "", "limits": map[string]any{"max_calls": s.Config.MaxCalls, "max_tools": s.Config.MaxTools, "run_seconds": s.Config.RunSeconds}, "notice": "当前浏览器保存工作区访问凭证，清除 Cookie 后无法自动找回。"})
+	var user any
+	session := sessionOf(r)
+	notice := "游客数据保存在服务端；注册账号后可跨设备恢复，清除游客 Cookie 后无法自动找回。"
+	if session.UserID != "" {
+		user = map[string]string{"id": session.UserID, "username": session.Username}
+		notice = "项目与已保存应用数据归属当前账号，可在其他设备登录恢复。"
+	}
+	send(w, 200, map[string]any{"csrf": r.Context().Value(ctxKey("csrf")), "user": user, "model_ready": ready, "runner_configured": s.Config.RunnerURL != "" && s.Config.RunnerToken != "", "limits": map[string]any{"max_calls": s.Config.MaxCalls, "max_tools": s.Config.MaxTools, "run_seconds": s.Config.RunSeconds}, "notice": notice})
 }
 func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
 	list, err := s.Store.List(owner(r))
@@ -438,6 +380,9 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
+			if !s.Store.SessionValid(sessionOf(r).TokenHash) {
+				return
+			}
 			p, err := s.Store.Get(owner(r), id)
 			if err != nil {
 				return

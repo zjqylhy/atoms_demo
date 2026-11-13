@@ -29,6 +29,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { diffLines } from "diff";
+import { AccountMenu, type Account } from "./components/AccountMenu";
 
 type FileInfo = {
   hash: string;
@@ -94,6 +95,7 @@ type Project = {
   events: ActivityEvent[];
 };
 type Bootstrap = {
+	user?: Account | null;
   csrf: string;
   model_ready: boolean;
   runner_configured: boolean;
@@ -554,6 +556,15 @@ export default function App() {
   async function list() {
     setProjects(await api("/projects"));
   }
+  async function accountChanged() {
+    selection.current = "";
+    setProject(undefined); setProjects([]); setVersion(""); setPath("");
+    localStorage.removeItem("atoms:last");
+    const response = await fetch("/api/bootstrap");
+    if (!response.ok) throw Error("无法刷新账号状态");
+    setBoot(await response.json());
+    await list();
+  }
   function applySnapshot(next: Project) {
     if (selection.current !== next.id) return;
     // UTC timestamps use RFC3339Nano with trailing fractional zeroes omitted.
@@ -877,7 +888,7 @@ export default function App() {
           <div className="profile">
             <span>L</span>
             <div>
-              我的工作区<small>保存在当前浏览器凭证下</small>
+              {boot?.user?.username || "游客工作区"}<small>{boot?.user ? "登录后可跨设备恢复" : "注册后可跨设备恢复"}</small>
             </div>
           </div>
         </div>
@@ -912,6 +923,7 @@ export default function App() {
             {project?.title || "新想法"}
           </button>
           <div className="top-right">
+            {boot && <AccountMenu user={boot.user} csrf={boot.csrf} onChange={accountChanged} />}
             <span className={"status " + (running ? "working" : "")}>
               {task ? statusText[task.status] || task.status : "创作工作台"}
             </span>
