@@ -37,6 +37,9 @@ import { SharePanel } from "./components/SharePanel";
 import { useAuth } from "./Auth";
 import { api, apiJSON, downloadFile, readDraft, saveDraft, recentProject, rememberProject } from "./api";
 import { DeleteProjectDialog } from "./components/DeleteProjectDialog";
+import { FallbackNotice } from "./components/FallbackNotice";
+import { useFallbackNavigation } from "./hooks/useFallbackNavigation";
+import { parseProjectLocation, projectLocation } from "./fallbackNavigation";
 
 type FileInfo = {
   hash: string;
@@ -492,7 +495,7 @@ export default function App() {
   const [initialDraft] = useState(() => readDraft(userID));
   const [initialized, setInitialized] = useState(false);
   const [projects, setProjects] = useState<{ id: string; title: string }[]>([]);
-  const [project, setProject] = useState<Project>();
+  const [currentProject, setProject] = useState<Project>();
   const [text, setText] = useState(initialDraft?.text || "");
   const [mode, setMode] = useState(initialDraft?.mode || "build");
   const [error, setError] = useState("");
@@ -501,8 +504,8 @@ export default function App() {
   const [mobileNav, setMobileNav] = useState(false);
   const [pane, setPane] = useState<"chat" | "work">("chat");
   const [tab, setTab] = useState("preview");
-  const [version, setVersion] = useState("");
-  const [path, setPath] = useState("");
+  const [selectedVersion, setVersion] = useState("");
+  const [selectedPath, setPath] = useState("");
   const [content, setContent] = useState("");
   const [oldContent, setOldContent] = useState("");
   const [mobile, setMobile] = useState(false);
@@ -524,6 +527,10 @@ export default function App() {
   const listRevision = useRef(0);
   const restoreDraftMode = useRef(true);
   const retry = useRef<{ key: string; id: string } | undefined>(undefined);
+  const fallback = useFallbackNavigation({user:userID, current:currentProject, selected:selection.current, onCommit:acceptDemo, onError:message=>{setError(message);if(message)setPane('chat');}});
+  const project = fallback.candidate?.project ?? currentProject;
+  const version = fallback.candidate?.version ?? selectedVersion;
+  const path = fallback.candidate ? 'index.html' : selectedPath;
   const task = project?.tasks.find((t) => t.id === project.current_task);
   const running = !!project?.active_run;
   const canSteer = running && task?.status === "running";
@@ -557,6 +564,15 @@ export default function App() {
     if (revision === listRevision.current) setProjects(items);
     return items as {id:string;title:string}[];
   }
+  function acceptDemo(demo: Project, targetVersion: string, from: string) {
+    selection.current = demo.id;
+    setProject(demo); setVersion(targetVersion); setPath('index.html'); setPane('work'); setTab('preview'); setMobileNav(false);
+    rememberProject(userID,demo.id); history.replaceState(null,'',projectLocation(demo.id,from));
+    void list().catch(() => {});
+  }
+  useEffect(() => {
+    if (fallback.candidate) { setPane('work'); setTab('preview'); setMobileNav(false); }
+  }, [fallback.candidate?.token]);
   function applySnapshot(next: Project) {
     if (selection.current !== next.id) return;
     // UTC timestamps use RFC3339Nano with trailing fractional zeroes omitted.
@@ -566,7 +582,8 @@ export default function App() {
         : next,
     );
   }
-  async function open(id: string) {
+  async function open(id: string, options: {initial?:boolean;from?:string} = {}) {
+    const navigation = fallback.cancel();
     setMobileNav(false);
     selection.current = id;
     setError("");
@@ -575,14 +592,22 @@ export default function App() {
     setPane("chat");
     try {
       const p = await api("/projects/" + id);
-      if (selection.current === id) {
+      if (selection.current === id && fallback.isCurrent(navigation)) {
         applySnapshot(p);
         rememberProject(userID, id);
-        history.replaceState(null, "", "/?project=" + id);
+        history.replaceState(null, "", projectLocation(id,options.from));
+        fallback.follow(p,navigation,options.initial);
+        if(options.from && p.source?.kind==='fallback') {
+          setPane('work');setTab('preview');setVersion(p.head||'');setPath('index.html');
+          const valid = await fallback.restoreOrigin(p,options.from,navigation);
+          if(valid===false && fallback.isCurrent(navigation)) history.replaceState(null,'',projectLocation(id));
+        }
+        return true;
       }
     } catch (e) {
-      setError(String((e as Error).message));
+      if(fallback.isCurrent(navigation) && (e as Error).name!=='AbortError') setError(String((e as Error).message));
     }
+    return false;
   }
   async function reload(id: string) {
     const p = await api("/projects/" + id);
@@ -594,16 +619,17 @@ export default function App() {
       if (!live) return;
       let legacy: string | null = null;
       try { legacy = localStorage.getItem("atoms:last"); localStorage.removeItem("atoms:last"); } catch { /* Optional storage. */ }
-      const id = new URLSearchParams(location.search).get("project") || initialDraft?.project || recentProject(userID) || legacy;
-      if (id && items.some(item => item.id === id)) await open(id);
+      const route = parseProjectLocation(new URL(location.href));
+      const id = route?.project || initialDraft?.project || recentProject(userID) || legacy;
+      if (id && items.some(item => item.id === id)) await open(id,{initial:true,from:route?.from});
       else if (id) { rememberProject(userID, ""); history.replaceState(null, "", "/"); }
       if (live) setInitialized(true);
     }).catch(e => { if (live && e.name !== "AbortError") setError(e.message); });
     return () => {live = false;};
   }, []);
   useEffect(() => {
-    if (initialized) saveDraft({user:userID, text, mode, project:project?.id});
-  }, [userID, text, mode, project?.id, initialized]);
+    if (initialized) saveDraft({user:userID, text, mode, project:currentProject?.id});
+  }, [userID, text, mode, currentProject?.id, initialized]);
   useEffect(() => {
     const missing = (event: Event) => {
       const id = (event as CustomEvent<string>).detail;
@@ -614,8 +640,8 @@ export default function App() {
     return () => window.removeEventListener("atoms:project-missing", missing);
   }, []);
   useEffect(() => {
-    if (!project?.id) return;
-    const id = project.id;
+    if (!currentProject?.id) return;
+    const id = currentProject.id;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const es = new EventSource("/api/projects/" + id + "/events");
     const update = () => {
@@ -642,7 +668,7 @@ export default function App() {
       es.close();
       if (timer) clearTimeout(timer);
     };
-  }, [project?.id]);
+  }, [currentProject?.id]);
   useEffect(() => {
     end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [project?.messages?.length, task?.status]);
@@ -691,7 +717,8 @@ export default function App() {
     extra: Record<string, string> = {},
     p = project,
   ) {
-    if (!p || selection.current !== p.id) return;
+    if (!p || selection.current !== p.id || fallback.phase) return;
+    const navigation = fallback.stamp();
     setBusy(true);
     setError("");
     const key = JSON.stringify([p.id, actionName, extra]);
@@ -705,7 +732,8 @@ export default function App() {
         ...extra,
       });
       retry.current = undefined;
-      if (selection.current === p.id) {
+      if (selection.current === p.id && fallback.isCurrent(navigation)) {
+        if(result.active_run && result.active_run !== p.active_run) fallback.follow(result,navigation);
         applySnapshot(result);
         if (actionName === "submit" || actionName === "steer") {
           setText((draft) => (draft === extra.text ? "" : draft));
@@ -714,13 +742,14 @@ export default function App() {
       }
       if (actionName !== "steer") await list();
     } catch (e) {
-      if (selection.current === p.id) setError((e as Error).message);
+      if (selection.current === p.id && fallback.isCurrent(navigation) && (e as Error).name!=='AbortError') setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }
   async function submit() {
-    if (!text.trim() || busy || !boot) return;
+    if (!text.trim() || busy || !boot || fallback.phase) return;
+    const navigation = fallback.stamp();
     if (running) {
       if (canSteer && project?.active_run) {
         await action("steer", { text, run_id: project.active_run });
@@ -733,6 +762,7 @@ export default function App() {
       setBusy(true);
       try {
         p = await api("/projects", { title: text.trim().slice(0, 28) });
+        if(!fallback.isCurrent(navigation)){setBusy(false);return;}
         selection.current = p!.id;
         setProject(p);
         rememberProject(userID, p!.id);
@@ -772,6 +802,7 @@ export default function App() {
     }
   }
   function newProject() {
+    fallback.cancel();
     setMobileNav(false);
     selection.current = "";
     setProject(undefined);
@@ -988,7 +1019,7 @@ export default function App() {
               <br className="small-only" /> Products out<span>.</span>
             </h1>
             <p className="intro">和你的 AI 团队一起，把想法变成真正的作品。</p>
-            <Catalog csrf={boot?.csrf||''} onOpen={async id=>{await list();await open(id);setPane('work');setTab('preview');}}/>
+            <Catalog csrf={boot?.csrf||''} onOpen={async id=>{await list();if(await open(id)){setPane('work');setTab('preview');}}}/>
             {composer}
             <div className="mode-explain">
               <Sparkles size={14} />
@@ -1044,10 +1075,11 @@ export default function App() {
                 产物工作区 <span>{files.length}</span>
               </button>
             </div>
-            {project.source && <div className="source-banner">{project.source.kind==='fallback'?'演示模式 · 原需求尚未完成，只提供预置功能':'预置示例副本 · 可交互、可保存，可继续提出修改要求'}</div>}
-            {project.recovery && <div className="source-banner">{project.recovery.unavailable ? '演示副本已删除，原任务与成果仍保留。' : '演示应用已就绪，原需求尚未完成。'}<button disabled={project.recovery.unavailable} onClick={async()=>{await list();await open(project.recovery!.project_id);setPane('work');setTab('preview');}}>{project.recovery.unavailable ? '副本已删除' : '打开演示应用'}</button></div>}
+            {project.source?.kind==='fallback' ? <FallbackNotice origin={fallback.candidate ? undefined : fallback.origin} onReturn={id=>void open(id)}/> : project.source && <div className="source-banner">预置示例副本 · 可交互、可保存，可继续提出修改要求</div>}
+            {fallback.phase && <div className="source-banner fallback-loading" role="status">正在打开演示应用…<button onClick={()=>{fallback.cancel();setPane('chat');}}>留在原任务</button></div>}
+            {project.recovery && <div className="source-banner">{project.recovery.unavailable ? '演示副本已删除，原任务与成果仍保留。' : '演示应用已就绪，原需求尚未完成。'}<button disabled={project.recovery.unavailable || !!fallback.phase} onClick={()=>void fallback.openDemo(project)}>{project.recovery.unavailable ? '副本已删除' : '打开演示应用'}</button></div>}
             {task?.status==='failed' && project.head && <div className="source-banner">本次修改未完成，之前的成功版本和应用数据已保留。<button onClick={()=>{setVersion(project.head!);setPath('index.html');setPane('work');setTab('preview');}}>查看上一可用版本</button></div>}
-            <div className={"workspace show-" + pane}>
+            <div className={"workspace show-" + pane} inert={!!fallback.phase}>
               <section className="conversation">
                 <div className="conversation-heading">
                   <span>
@@ -1362,11 +1394,14 @@ export default function App() {
                       <div className="empty-work"><h2>文件已保存，等待运行检查</h2><p>构建完成后将在这里显示交互预览。<br />现在可以切换到“文件”查看源码。</p></div>
                     ) : path.endsWith(".html") ? (
                       <div
-                        className={"preview-wrap " + (mobile ? "mobile" : "")}
+                        className={"preview-wrap " + (mobile ? "mobile " : "") + (fallback.candidate ? "preview-preparing" : "")}
                       >
                         <AppPreview
                           key={`${project.id}-${boot!.csrf}-${previewHead ?? ""}-${version}-${refresh}-${files.map(name => name + manifest[name]?.hash).join("|")}`}
                           projectId={project.id} version={version} csrf={boot!.csrf}
+                          requireFormal={!!fallback.candidate}
+                          onReady={()=>fallback.previewReady(project.id,fallback.candidate?.token)}
+                          onFailure={error=>fallback.previewFailed(project.id,error,fallback.candidate?.token)}
                         />
                       </div>
                     ) : path.endsWith(".md") ? (

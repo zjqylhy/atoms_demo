@@ -1689,6 +1689,13 @@ th {
 .account-menu > button { border:1px solid var(--line,#ddd);border-radius:8px;background:transparent;padding:7px 10px;color:inherit; }
 .form-error { color:#a93632; }
 .app-preview {display:flex;flex-direction:column;width:100%;height:100%;min-height:540px;}
+.fallback-notice {display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap;}
+.fallback-notice p {margin:3px 0;overflow-wrap:anywhere;}
+.fallback-actions {display:flex;align-items:start;gap:12px;flex-wrap:wrap;}
+.fallback-actions summary {cursor:pointer;}
+.fallback-actions details {max-width:440px;}
+.fallback-notice button,.fallback-loading button {margin-left:0;}
+.preview-preparing .app-preview {visibility:hidden;}
 .app-preview iframe {flex:1;width:100%;border:0;min-height:450px;}
 .app-data-bar {display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:9px 12px;font-size:12px;background:#edf7f0;color:#256342;}
 .app-data-bar span {flex:1;min-width:150px;}

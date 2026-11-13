@@ -1,3 +1,5 @@
+import { parseProjectLocation, projectLocation } from './fallbackNavigation';
+
 export type Account = { id: string; username: string };
 export type Bootstrap = { user: Account | null; csrf: string; model_ready: boolean; runner_configured: boolean; notice: string };
 export class ApiError extends Error {
@@ -24,7 +26,7 @@ export function invalidateSession(reason = 'expired') {
 
 // The session fence also covers downloads: delayed responses from an old
 // account cannot repopulate a newly signed-in workspace.
-async function request(path: string, init: RequestInit, blob: boolean) {
+async function request(path: string, init: RequestInit, format: 'json' | 'blob' | 'text') {
   const epoch = generation;
   const controller = new AbortController();
   pending.add(controller);
@@ -34,7 +36,7 @@ async function request(path: string, init: RequestInit, blob: boolean) {
   const url = path.startsWith('/api/') ? path : '/api' + path;
   try {
     const response = await fetch(url, { ...init, headers, credentials: 'same-origin', signal: init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal });
-    const data = response.ok && blob ? await response.blob() : await response.json();
+    const data = response.ok && format === 'blob' ? await response.blob() : response.ok && format === 'text' ? await response.text() : await response.json();
     if (epoch !== generation) throw new DOMException('账号状态已变化', 'AbortError');
     if (!response.ok) {
       const error = new ApiError(data.error || `请求失败 (${response.status})`, response.status, data.code);
@@ -45,12 +47,13 @@ async function request(path: string, init: RequestInit, blob: boolean) {
     return data;
   } finally { pending.delete(controller); }
 }
-export function apiJSON(path: string, init: RequestInit = {}) { return request(path, init, false); }
+export function apiJSON(path: string, init: RequestInit = {}) { return request(path, init, 'json'); }
+export async function apiText(path: string, init: RequestInit = {}): Promise<string> { return request(path, init, 'text'); }
 export function api(path: string, body?: unknown, method = 'POST') {
   return apiJSON(path, body === undefined ? {} : { method, body: JSON.stringify(body) });
 }
 export async function downloadFile(path: string, name: string) {
-  const blob = await request(path, {}, true);
+  const blob = await request(path, {}, 'blob');
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a'); link.href = url; link.download = name; link.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -62,8 +65,8 @@ export function safeReturnTo(raw: string | null): string {
     if (url.origin !== location.origin || url.hash) return '/';
     if (/^\/share\/[a-f0-9]{64}$/.test(url.pathname) && !url.search) return url.pathname;
     if (url.pathname !== '/') return '/';
-    const id = url.searchParams.get('project');
-    if (id && /^[a-f0-9]{32}$/.test(id) && [...url.searchParams.keys()].length === 1) return `/?project=${id}`;
+    const project = parseProjectLocation(url);
+    if (project) return projectLocation(project.project, project.from);
     return '/';
   } catch { return '/'; }
 }

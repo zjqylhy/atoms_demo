@@ -4,7 +4,7 @@ import {apiJSON} from '../api';
 
 type AppState = {schema_version:number; revision:number; value:Record<string,unknown>};
 type Access = {mode:string; grant?:string; version:string; contract?:{schema_version:number; initial_state:Record<string,unknown>}; state?:AppState};
-export function AppPreview({projectId,version,csrf,sharedToken}:{projectId:string;version:string;csrf:string;sharedToken?:string}) {
+export function AppPreview({projectId,version,csrf,sharedToken,onReady,onFailure,requireFormal=false}:{projectId:string;version:string;csrf:string;sharedToken?:string;onReady?:()=>void;onFailure?:(error:Error)=>void;requireFormal?:boolean}) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [instance] = useState(() => crypto.randomUUID());
   const [access,setAccess] = useState<Access>();
@@ -15,26 +15,34 @@ export function AppPreview({projectId,version,csrf,sharedToken}:{projectId:strin
   const trial = useRef<AppState | undefined>(undefined);
   const port = useRef<MessagePort | undefined>(undefined);
   const active = useRef(true);
+  const lifetime = useRef(0);
+  const ready = useRef(false);
+  const observers = useRef({onReady,onFailure}); observers.current = {onReady,onFailure};
   const pending = useRef(false);
   const receipts = useRef(new Map<string,{hash:string;revision:number}>());
   const base = sharedToken ? `/api/shares/${encodeURIComponent(sharedToken)}` : `/api/projects/${projectId}`;
   function api(path:string,init:RequestInit={}) { return apiJSON(base+path,init); }
   async function grant(expectedVersion?:string) {
+    const turn = lifetime.current;
     const value:Access = sharedToken ? await api('') : await api('/preview-access',{method:'POST',body:JSON.stringify({version})});
-    if (!active.current) throw new Error('预览已关闭');
+    if (!active.current || turn !== lifetime.current) throw new DOMException('预览已关闭','AbortError');
     if(expectedVersion && (value.mode!=='formal' || value.version!==expectedVersion)) throw new Error('当前交付版本已改变，请刷新预览');
     current.current = value; setAccess(value);
     if (value.mode === 'trial' && !trial.current) trial.current = {schema_version:value.contract!.schema_version,revision:0,value:structuredClone(value.contract!.initial_state)};
     return value;
   }
   useEffect(() => {
-    active.current = true;
+    active.current = true; lifetime.current++; ready.current = false;
+    const turn = lifetime.current;
     grant().then(value => {
+      if (!active.current || turn !== lifetime.current) return;
       setStatus(value.mode === 'formal' ? '已连接服务端 · 保存后可刷新或跨设备恢复' : value.mode === 'trial' ? '试用数据 · 草稿和历史版本不会修改正式数据' : value.mode === 'incompatible' ? '数据格式不兼容，请切回兼容版本；正式数据已保留' : '旧版应用 · 尚未接入持久化，页面内的修改可能随刷新丢失');
       setProblem(value.mode === 'incompatible');
-    }).catch(error => { if(active.current){setStatus(error.message);setProblem(true);} });
-    return () => {active.current=false;port.current?.close();port.current=undefined;};
+      if(requireFormal && value.mode!=='formal') initialFailure(new Error('演示版本暂不能连接正式应用数据'));
+    }).catch(error => { if(active.current && turn === lifetime.current && error.name!=='AbortError'){setStatus(error.message);setProblem(true);initialFailure(error);} });
+    return () => {active.current=false;lifetime.current++;port.current?.close();port.current=undefined;};
   },[projectId,version,csrf]);
+  function initialFailure(error:Error) { if(active.current && !ready.current) observers.current.onFailure?.(error); }
   async function load() {
     const info = current.current!;
     if (info.mode === 'trial') return structuredClone(trial.current!);
@@ -81,9 +89,13 @@ export function AppPreview({projectId,version,csrf,sharedToken}:{projectId:strin
         if(data.op!=='load' && data.op!=='save') throw new Error('不支持的数据操作');
         if(data.op==='save')setStatus('正在保存…');
         const result=data.op==='load'?await load():await save(data.value,data.expectedRevision,data.requestId);
-        if(active.current){setProblem(false);setStatus(current.current?.mode==='formal'?'已保存到服务端':'已保存试用数据 · 切换项目后重置');}
+        if(!active.current || port.current!==channel.port1) return;
+        setProblem(false);setStatus(current.current?.mode==='formal'?'已保存到服务端':'已保存试用数据 · 切换项目后重置');
         reply({result});
-      } catch(error){const err=error as Error & {status?:number};if(active.current){setProblem(true);setStatus(err.message);}reply({error:err.message,status:err.status});}
+        // A loaded iframe may contain an error page. The first data reply proves
+        // that this sandbox instance connected to the platform successfully.
+        if(data.op==='load' && !ready.current){ready.current=true;observers.current.onReady?.();}
+      } catch(error){const err=error as Error & {status?:number};if(active.current && port.current===channel.port1){setProblem(true);setStatus(err.message);initialFailure(err);}reply({error:err.message,status:err.status});}
       finally{pending.current=false;}
     };
     // The sandbox has an opaque origin. Only this window receives the port;
