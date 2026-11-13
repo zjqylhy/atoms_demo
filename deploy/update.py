@@ -93,7 +93,7 @@ except Exception:
     if compatible_rollback(previous, root/'data/atoms.db'):
         activate(previous)
     else:
-        raise RuntimeError('Previous release cannot preserve account/app data. Services remain stopped; use a compatible recovery build. Database has not been restored or erased.')
+        raise RuntimeError('Previous release cannot preserve login, shared-project, quota and deletion semantics. Services remain stopped; use a compatible recovery build. Database has not been restored or erased.')
     raise
 receipt = json.loads((root/'release-receipt.json').read_text())
 receipt.update(release=str(target),previous=str(previous))
