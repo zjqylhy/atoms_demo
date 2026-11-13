@@ -138,7 +138,8 @@ func main() {
 	engine := agent.New(db, c, client)
 	engine.Quota = quota
 	defer engine.Shutdown()
-	started, err := engine.Start(*owner, created.ID, "", "build", core.ID(), "continue", "")
+	// Administrative replays explicitly charge the selected workspace.
+	started, err := engine.Start(core.RunActor{Workspace: *owner}, *owner, created.ID, "", "build", core.ID(), "continue", "")
 	if err != nil {
 		log.Fatal(err)
 	}

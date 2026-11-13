@@ -109,7 +109,7 @@ func TestDialogueSummaryHardLimitBoundary(t *testing.T) {
 			client.Config.BaseURL = server.URL
 			e, p := testEngine(t, client)
 			seedDialogueTask(t, e, p.ID, fixture, task)
-			started, err := e.Start("alice", p.ID, "", "build", "boundary", "continue", "")
+			started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "build", "boundary", "continue", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -177,7 +177,7 @@ func TestDialogueSummaryBatchesAndResume(t *testing.T) {
 			e := New(db, cfg, client)
 			t.Cleanup(e.Shutdown)
 			seedDialogueTask(t, e, p.ID, fixture, task)
-			started, err := e.Start("alice", p.ID, "", "build", "first", "continue", "")
+			started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "build", "first", "continue", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +205,7 @@ func TestDialogueSummaryBatchesAndResume(t *testing.T) {
 				}
 				e = New(db, cfg, client)
 				t.Cleanup(e.Shutdown)
-				started, err = e.Start("alice", p.ID, "", "build", "resume", "continue", "")
+				started, err = e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "build", "resume", "continue", "")
 				if err != nil {
 					t.Fatal(err)
 				}

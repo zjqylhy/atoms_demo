@@ -289,7 +289,15 @@ type Checkpoint struct {
 	Manifest Manifest `json:"manifest"`
 	StepID   string   `json:"step_id"`
 }
+
+// RunActor separates who consumes a run's quota from where shared files live.
+type RunActor struct {
+	UserID    string `json:"user_id,omitempty"`
+	Workspace string `json:"workspace"`
+}
+
 type Run struct {
+	Actor         *RunActor      `json:"actor,omitempty"`
 	ID            string         `json:"id"`
 	TaskID        string         `json:"task_id"`
 	Epoch         int64          `json:"epoch"`

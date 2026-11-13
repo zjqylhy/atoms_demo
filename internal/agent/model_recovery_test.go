@@ -36,7 +36,7 @@ func TestServiceRecoveryBoundsAndNoBudgetBypass(t *testing.T) {
 
 func TestMissingModelCreatesDistinctPersistentDemoWithoutCharging(t *testing.T) {
 	e, p := testEngine(t, model.New(config.Config{}))
-	started, err := e.Start("alice", p.ID, "制作阅读清单", "build", "missing-model", "submit", "")
+	started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "制作阅读清单", "build", "missing-model", "submit", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestMissingModelCreatesDistinctPersistentDemoWithoutCharging(t *testing.T) 
 	if len(list) != 2 {
 		t.Fatal("duplicated fallback", len(list))
 	}
-	if _, err = e.Start("alice", p.ID, "", "build", "retry-original", "continue", ""); err != nil {
+	if _, err = e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "build", "retry-original", "continue", ""); err != nil {
 		t.Fatal(err)
 	}
 	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.ActiveRun == "" })
@@ -67,7 +67,7 @@ func TestMissingModelCreatesDistinctPersistentDemoWithoutCharging(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = e.Start("alice", plan.ID, "规划网页", "plan", "plan-no-model", "submit", ""); err != nil {
+	if _, err = e.Start(core.RunActor{Workspace: "alice"}, "alice", plan.ID, "规划网页", "plan", "plan-no-model", "submit", ""); err != nil {
 		t.Fatal(err)
 	}
 	plan = waitProject(t, e, plan.ID, func(p *core.Project) bool { return p.ActiveRun == "" })
@@ -105,7 +105,7 @@ func TestHTTPServiceRetryAndBackupChargeEverySend(t *testing.T) {
 			e.Config.BackupModel = cfg.BackupModel
 			e.Config.BackupAPIKey = cfg.BackupAPIKey
 			e.Config.Protocol = cfg.Protocol
-			started, err := e.Start("alice", p.ID, "回答问题", "build", "service-recovery", "submit", "")
+			started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "回答问题", "build", "service-recovery", "submit", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -144,7 +144,7 @@ func TestBothModelRoutesFailToOneDemoWithoutExtraBackupRetries(t *testing.T) {
 	e.Config.BackupBaseURL = cfg.BackupBaseURL
 	e.Config.BackupModel = cfg.BackupModel
 	e.Config.BackupAPIKey = cfg.BackupAPIKey
-	if _, err := e.Start("alice", p.ID, "构建应用", "build", "both-routes-fail", "submit", ""); err != nil {
+	if _, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "构建应用", "build", "both-routes-fail", "submit", ""); err != nil {
 		t.Fatal(err)
 	}
 	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.ActiveRun == "" })

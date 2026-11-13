@@ -78,7 +78,15 @@ func TestHTTPWorkspaceCSRFBackgroundExecutionAndVersionIsolation(t *testing.T) {
 		json.Unmarshal(b, &v)
 		return v["csrf"].(string)
 	}
-	a, b := bootstrap(alice), bootstrap(bob)
+	register := func(client *http.Client, name string) string {
+		token := bootstrap(client)
+		status, data := req(client, "POST", "/api/auth/register", token, core.JSON(map[string]string{"username": name, "password": "test password long enough"}))
+		if status != 200 {
+			t.Fatal(status, string(data))
+		}
+		return bootstrap(client)
+	}
+	a, b := register(alice, "alice"), register(bob, "bob")
 	if status, _ := req(alice, "POST", "/api/projects", "", `{"title":"private"}`); status != 403 {
 		t.Fatal("missing CSRF accepted")
 	}
@@ -91,13 +99,8 @@ func TestHTTPWorkspaceCSRFBackgroundExecutionAndVersionIsolation(t *testing.T) {
 	}
 	json.Unmarshal(raw, &p)
 	base := "/api/projects/" + p.ID
-	for _, route := range []string{base, base + "/files?path=secret.md", base + "/export", base + "/preview", base + "/events"} {
-		if status, _ := req(bob, "GET", route, "", ""); status != 404 {
-			t.Fatalf("cross-owner read %s: %d", route, status)
-		}
-	}
-	if status, _ := req(bob, "POST", base+"/actions", b, `{"action":"submit","text":"x","request_id":"foreign"}`); status != 404 {
-		t.Fatal("cross-owner action accepted")
+	if status, _ := req(bob, "GET", base, "", ""); status != 200 {
+		t.Fatal("shared project unavailable", status)
 	}
 	if status, _ := req(alice, "POST", base+"/inputs", a, `{"name":"../escape.csv","content":"x\n1"}`); status != 400 {
 		t.Fatal("path escape accepted", status)
@@ -116,8 +119,8 @@ func TestHTTPWorkspaceCSRFBackgroundExecutionAndVersionIsolation(t *testing.T) {
 		t.Fatal("missing active run", err)
 	}
 	steer := core.JSON(map[string]string{"action": "steer", "run_id": started.ActiveRun, "request_id": "steer-once", "text": "用简短说明"})
-	if status, _ := req(bob, "POST", base+"/actions", b, steer); status != 404 {
-		t.Fatal("cross-owner instruction accepted", status)
+	if status, _ := req(bob, "POST", base+"/actions", b, steer); status != 200 {
+		t.Fatal("shared instruction rejected", status)
 	}
 	for range 2 {
 		status, raw := req(alice, "POST", base+"/actions", a, steer)

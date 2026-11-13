@@ -78,7 +78,21 @@ func send(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func (s *Server) fail(w http.ResponseWriter, status int, err error) {
+	if errors.Is(err, store.ErrSession) {
+		s.failCode(w, 401, "login_required", store.ErrSession.Error())
+		return
+	}
 	send(w, status, map[string]any{"error": s.Config.Redact(err.Error())})
+}
+func (s *Server) failCode(w http.ResponseWriter, status int, code, message string) {
+	send(w, status, map[string]string{"code": code, "error": s.Config.Redact(message)})
+}
+func (s *Server) projectFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, core.ErrNotFound) {
+		s.failCode(w, 404, "project_not_found", "项目不存在或已被删除")
+		return
+	}
+	s.fail(w, 503, err)
 }
 func owner(r *http.Request) string { v, _ := r.Context().Value(ctxKey("owner")).(string); return v }
 func csrf(token string) string     { return core.Hash([]byte("atoms-csrf:" + token)) }
@@ -101,31 +115,27 @@ func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	var user any
 	session := sessionOf(r)
-	notice := "游客数据保存在服务端；注册账号后可跨设备恢复，清除游客 Cookie 后无法自动找回。"
+	notice := "请登录后使用。所有登录账号均可查看、修改和删除共享项目。"
 	if session.UserID != "" {
 		user = map[string]string{"id": session.UserID, "username": session.Username}
-		notice = "项目与已保存应用数据归属当前账号，可在其他设备登录恢复。"
+		notice = "共享工作空间：所有登录账号均可查看、修改和删除项目。"
 	}
 	send(w, 200, map[string]any{"csrf": r.Context().Value(ctxKey("csrf")), "user": user, "model_ready": ready, "runner_configured": s.Config.RunnerURL != "" && s.Config.RunnerToken != "", "limits": map[string]any{"max_calls": s.Config.MaxCalls, "max_tools": s.Config.MaxTools, "run_seconds": s.Config.RunSeconds}, "notice": notice})
 }
 func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
-	list, err := s.Store.List(owner(r))
-	if err != nil {
-		s.fail(w, 500, errors.New("无法读取项目"))
-		return
-	}
-	if r.Method == "GET" {
+	if readMethod(r) {
+		list, err := s.Store.SharedProjects(sessionOf(r).TokenHash)
+		if err != nil {
+			s.fail(w, 503, err)
+			return
+		}
 		send(w, 200, list)
-		return
-	}
-	if len(list) >= 30 {
-		s.fail(w, 409, errors.New("当前工作区最多 30 个项目"))
 		return
 	}
 	var body struct {
 		Title string `json:"title"`
 	}
-	if err = decode(r, &body); err != nil {
+	if err := decode(r, &body); err != nil {
 		s.fail(w, 400, err)
 		return
 	}
@@ -217,7 +227,9 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 		if body.Action == "answer" {
 			decisionID = body.QuestionID
 		}
-		p, err = s.Engine.Start(owner(r), id, body.Text, body.Mode, body.RequestID, body.Action, decisionID)
+		session := sessionOf(r)
+		actor := core.RunActor{UserID: session.UserID, Workspace: session.Workspace}
+		p, err = s.Engine.Start(actor, owner(r), id, body.Text, body.Mode, body.RequestID, body.Action, decisionID)
 	}
 	if err != nil {
 		status := 409
@@ -425,7 +437,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
-			if !s.Store.SessionValid(sessionOf(r).TokenHash) {
+			if !s.Store.AccountSessionValid(sessionOf(r).TokenHash) {
 				return
 			}
 			p, err := s.Store.Get(owner(r), id)

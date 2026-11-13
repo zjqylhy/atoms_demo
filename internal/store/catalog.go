@@ -57,9 +57,9 @@ func (s *Store) CopyPreset(sessionHash, template, requestID string) (*core.Proje
 		return nil, err
 	}
 	defer tx.Rollback()
-	session, err := readSession(tx, sessionHash)
+	session, err := readAccount(tx, sessionHash)
 	if err != nil {
-		return nil, ErrSession
+		return nil, err
 	}
 	var data []byte
 	var priorTemplate string

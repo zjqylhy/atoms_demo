@@ -14,7 +14,7 @@ func (s *Store) CreateShare(sessionHash, id, version string) (string, string, er
 		return "", "", err
 	}
 	defer tx.Rollback()
-	p, err := authProject(tx, sessionHash, id)
+	p, err := sharedProject(tx, sessionHash, id)
 	if err != nil {
 		return "", "", err
 	}
@@ -101,7 +101,7 @@ func (s *Store) Shares(sessionHash, id string) ([]map[string]string, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err = authProject(tx, sessionHash, id); err != nil {
+	if _, err = sharedProject(tx, sessionHash, id); err != nil {
 		return nil, err
 	}
 	rows, err := tx.Query(`SELECT id,version_id,created FROM share_links WHERE project_id=? AND revoked_at='' ORDER BY created DESC`, id)
@@ -126,7 +126,7 @@ func (s *Store) RevokeShare(sessionHash, id, shareID string) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = authProject(tx, sessionHash, id); err != nil {
+	if _, err = sharedProject(tx, sessionHash, id); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(`UPDATE share_links SET revoked_at=? WHERE id=? AND project_id=?`, core.Now(), shareID, id); err != nil {
@@ -146,9 +146,9 @@ func (s *Store) CopyShare(sessionHash, token, requestID string) (*core.Project, 
 		return nil, err
 	}
 	defer tx.Rollback()
-	session, err := readSession(tx, sessionHash)
+	session, err := readAccount(tx, sessionHash)
 	if err != nil {
-		return nil, ErrSession
+		return nil, err
 	}
 	original, version, title, err := readShare(tx, token)
 	if err != nil {

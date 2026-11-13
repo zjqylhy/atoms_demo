@@ -9,7 +9,7 @@ import (
 func (s *Server) shares(w http.ResponseWriter, r *http.Request) {
 	id, hash := r.PathValue("id"), sessionOf(r).TokenHash
 	switch r.Method {
-	case "GET":
+	case "GET", "HEAD":
 		out, err := s.Store.Shares(hash, id)
 		if err != nil {
 			s.appFailure(w, err)
