@@ -72,17 +72,21 @@ test("real build and browser track transitive inputs and resolution changes", as
           selector: "#message",
           value: "Second",
           requirement: "可翻页",
+          paths: ["pages/view.html", "pages/app.ts", "pages/style.css"],
         },
       ],
     },
     true,
     (name, detail, status = "passed", evidence = {}) =>
       checks.push({ name, detail, status, ...evidence }),
-    process.env.ATOMS_TEST_BROWSER_CHANNEL
-      ? { channel: process.env.ATOMS_TEST_BROWSER_CHANNEL }
-      : process.platform === "win32"
-        ? { channel: "chrome" }
-        : {},
+    {
+      inputPaths: Object.keys(files),
+      launchOptions: process.env.ATOMS_TEST_BROWSER_CHANNEL
+        ? { channel: process.env.ATOMS_TEST_BROWSER_CHANNEL }
+        : process.platform === "win32"
+          ? { channel: "chrome" }
+          : {},
+    },
   );
   assert.ok(checks.length >= 12);
   assert.ok(
@@ -113,6 +117,29 @@ test("real build and browser track transitive inputs and resolution changes", as
   await fs.unlink(path.join(root, "pages/content.js"));
   await fs.unlink(path.join(root, "pages/content.ts"));
   await assert.rejects(build(), /resolve/);
+});
+
+test("browser rejects assertion paths outside the registered input", async () => {
+  await assert.rejects(
+    checkBrowser(
+      "<h1>actual</h1>",
+      {
+        steps: [
+          {
+            action: "expect_text",
+            selector: "h1",
+            value: "actual",
+            requirement: "title",
+            paths: ["missing.html"],
+          },
+        ],
+      },
+      true,
+      () => {},
+      { inputPaths: ["index.html"] },
+    ),
+    /paths 必须指向实际输入文件/,
+  );
 });
 
 test("inline modules and missing resources do not produce incomplete exact evidence", async (t) => {

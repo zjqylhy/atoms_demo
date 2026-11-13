@@ -2,7 +2,13 @@ const http = require("node:http");
 const { chromium } = require("playwright");
 const CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'; sandbox allow-scripts allow-forms";
-async function checkBrowser(html, p, test, check, launchOptions = {}) {
+async function checkBrowser(
+  html,
+  p,
+  test,
+  check,
+  { inputPaths = [], launchOptions = {} } = {},
+) {
   const steps = p.steps || [];
   if (test) {
     if (
@@ -19,8 +25,7 @@ async function checkBrowser(html, p, test, check, launchOptions = {}) {
         (!Array.isArray(s.paths) ||
           !s.paths.length ||
           s.paths.some(
-            (name) =>
-              typeof name !== "string" || !Object.hasOwn(job.files, name),
+            (name) => typeof name !== "string" || !inputPaths.includes(name),
           ))
       )
         throw Error("浏览器断言的 paths 必须指向实际输入文件");

@@ -300,6 +300,8 @@ async function goProject() {
       job.parameters,
       job.action === "test_preview",
       check,
+      // Assertions can refer only to files in this registered execution input.
+      { inputPaths: Object.keys(job.files) },
     );
   } else throw Error("不支持的执行动作");
   details.elapsed_ms = Date.now() - start;
