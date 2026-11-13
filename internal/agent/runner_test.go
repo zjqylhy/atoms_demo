@@ -226,7 +226,7 @@ func TestStopRunnerWaitAndContinueOriginalJob(t *testing.T) {
 	}))
 	defer server.Close()
 	e.Config.RunnerURL, e.Config.RunnerToken = server.URL, "test"
-	first, err := e.Start("alice", p.ID, "执行检查", "build", "start", "submit", "")
+	first, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "执行检查", "build", "start", "submit", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestStopRunnerWaitAndContinueOriginalJob(t *testing.T) {
 		t.Fatal("stopped run changed the saved checkpoint or recorded an unconfirmed report")
 	}
 	ready.Store(true)
-	second, err := e.Start("alice", p.ID, "", "build", "resume", "continue", "")
+	second, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "build", "resume", "continue", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestStopRunnerWaitAndContinueOriginalJob(t *testing.T) {
 	if posts.Load() != 1 || len(p.Reports) != 1 || p.Files["notes.txt"].Hash == "" || !strings.Contains(p.Runs[second.ActiveRun].Error, "执行环境故障") {
 		t.Fatalf("unexpected resumed run: posts=%d %s", posts.Load(), core.JSON(p.Public()))
 	}
-	third, err := e.Start("alice", p.ID, "", "build", "resume2", "continue", "")
+	third, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "build", "resume2", "continue", "")
 	if err != nil {
 		t.Fatal(err)
 	}

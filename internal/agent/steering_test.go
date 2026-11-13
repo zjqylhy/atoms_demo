@@ -59,7 +59,7 @@ func TestSteeringReturnsEveryDelegateToTheRoot(t *testing.T) {
 				return call("finish_task", map[string]any{"summary": "按最新指令改为绿色", "answer_only": true}), usage, nil
 			})
 			e, p := testEngine(t, g)
-			started, err := e.Start("alice", p.ID, "初版", "build", "start", "submit", "")
+			started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "初版", "build", "start", "submit", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -154,7 +154,7 @@ func TestSteeringLetsStartedRunnerFinishAndSkipsLaterTools(t *testing.T) {
 			})
 			e, p := testEngine(t, g)
 			e.Config.RunnerURL, e.Config.RunnerToken = server.URL, "test"
-			started, err := e.Start("alice", p.ID, "执行检查", "build", "start", "submit", "")
+			started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "执行检查", "build", "start", "submit", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -171,7 +171,7 @@ func TestSteeringLetsStartedRunnerFinishAndSkipsLaterTools(t *testing.T) {
 				if err := e.Store.Recover(); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := e.Start("alice", p.ID, "", "build", "resume", "continue", ""); err != nil {
+				if _, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "build", "resume", "continue", ""); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -245,12 +245,12 @@ func TestSteeringCanReviseAnApprovedPlan(t *testing.T) {
 		}
 	})
 	e, p := testEngine(t, g)
-	if _, err := e.Start("alice", p.ID, "输出数据", "plan", "start", "submit", ""); err != nil {
+	if _, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "输出数据", "plan", "start", "submit", ""); err != nil {
 		t.Fatal(err)
 	}
 	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.ActiveRun == "" })
 	firstPlan := p.Tasks[p.CurrentTask].Plan.Revision
-	approved, err := e.Start("alice", p.ID, "", "plan", "approve", "approve", firstPlan)
+	approved, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "plan", "approve", "approve", firstPlan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestSteeringCanReviseAnApprovedPlan(t *testing.T) {
 		len(task.Plan.Acceptance) != 1 || task.Plan.Acceptance[0] != "输出 JSON" || len(p.Versions) != 0 {
 		t.Fatalf("revision did not return to approval: %s", core.JSON(p.Public()))
 	}
-	if _, err := e.Start("alice", p.ID, "", "plan", "old-approval", "approve", firstPlan); err == nil {
+	if _, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "plan", "old-approval", "approve", firstPlan); err == nil {
 		t.Fatal("accepted approval of the old plan")
 	}
 }

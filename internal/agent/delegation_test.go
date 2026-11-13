@@ -39,7 +39,7 @@ func TestDelegationReturnsBeforeParentBudgetExhaustion(t *testing.T) {
 				e.Config.DelegateSeconds = 1
 				e.Config.RunSeconds = 8
 				e.Config.ParentReserveSeconds = 2
-				started, err := e.Start("alice", p.ID, "核对资料", "build", "start", "submit", "")
+				started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "核对资料", "build", "start", "submit", "")
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -174,7 +174,7 @@ func TestDelegationPassesReadEvidenceInBothDirections(t *testing.T) {
 	if _, err := e.Store.Mutate("alice", p.ID, blobs, func(p *core.Project) error { p.Files = manifest; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	started, err := e.Start("alice", p.ID, "review inputs", "build", "start", "submit", "")
+	started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "review inputs", "build", "start", "submit", "")
 	if err != nil {
 		t.Fatal(err)
 	}

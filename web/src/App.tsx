@@ -25,10 +25,18 @@ import {
   ListChecks,
   LoaderCircle,
   MessageCircle,
+  Trash2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { diffLines } from "diff";
+import { AccountMenu } from "./components/AccountMenu";
+import { AppPreview } from "./components/AppPreview";
+import { Catalog } from "./components/Catalog";
+import { SharePanel } from "./components/SharePanel";
+import { useAuth } from "./Auth";
+import { api, apiJSON, downloadFile, readDraft, saveDraft, recentProject, rememberProject } from "./api";
+import { DeleteProjectDialog } from "./components/DeleteProjectDialog";
 
 type FileInfo = {
   hash: string;
@@ -72,6 +80,9 @@ type Message = { id: string; role: string; text: string; kind: string };
 type ActivityEvent = { seq: number; kind: string; role?: string; text: string; at: string };
 type Process = { start: number; entries: (Message | ActivityEvent)[] };
 type Project = {
+  source?: {kind:string;template?:string};
+  recovery?: {project_id:string;run_id:string;reason:string;unavailable?:boolean};
+  head?: string;
   preview_ready?: boolean;
   id: string;
   title: string;
@@ -92,12 +103,6 @@ type Project = {
   versions: Version[];
   reports: Report[];
   events: ActivityEvent[];
-};
-type Bootstrap = {
-  csrf: string;
-  model_ready: boolean;
-  runner_configured: boolean;
-  notice: string;
 };
 const statusText: Record<string, string> = {
   running: "执行中",
@@ -482,11 +487,14 @@ function JSONView({ text }: { text: string }) {
 }
 
 export default function App() {
-  const [boot, setBoot] = useState<Bootstrap>();
+  const { boot } = useAuth();
+  const userID = boot!.user!.id;
+  const [initialDraft] = useState(() => readDraft(userID));
+  const [initialized, setInitialized] = useState(false);
   const [projects, setProjects] = useState<{ id: string; title: string }[]>([]);
   const [project, setProject] = useState<Project>();
-  const [text, setText] = useState("");
-  const [mode, setMode] = useState("build");
+  const [text, setText] = useState(initialDraft?.text || "");
+  const [mode, setMode] = useState(initialDraft?.mode || "build");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [sidebar, setSidebar] = useState(false);
@@ -504,6 +512,7 @@ export default function App() {
   const [inputText, setInputText] = useState("");
   const [rename, setRename] = useState<{ id: string; title: string }>();
   const [renameError, setRenameError] = useState("");
+  const [deleting, setDeleting] = useState<{id:string;title:string}>();
   const [confirm, setConfirm] = useState<{
     action: string;
     title: string;
@@ -512,6 +521,8 @@ export default function App() {
   const [streamState, setStreamState] = useState("");
   const end = useRef<HTMLDivElement>(null);
   const selection = useRef("");
+  const listRevision = useRef(0);
+  const restoreDraftMode = useRef(true);
   const retry = useRef<{ key: string; id: string } | undefined>(undefined);
   const task = project?.tasks.find((t) => t.id === project.current_task);
   const running = !!project?.active_run;
@@ -531,28 +542,19 @@ export default function App() {
   ].sort();
   const reports = selected?.reports || project?.reports || [];
   useEffect(() => {
-    if (task) setMode(task.mode);
+    if (!task) return;
+    if (restoreDraftMode.current && initialDraft?.project === project?.id) {
+      restoreDraftMode.current = false;
+      return;
+    }
+    restoreDraftMode.current = false;
+    setMode(task.mode);
   }, [task?.id, task?.mode]);
-  async function api(url: string, body?: unknown, method = "POST") {
-    const r = await fetch(
-      "/api" + url,
-      body === undefined
-        ? {}
-        : {
-            method,
-            headers: {
-              "Content-Type": "application/json",
-              "X-CSRF-Token": boot?.csrf || "",
-            },
-            body: JSON.stringify(body),
-          },
-    );
-    const data = await r.json();
-    if (!r.ok) throw Error(data.error || `请求失败 (${r.status})`);
-    return data;
-  }
   async function list() {
-    setProjects(await api("/projects"));
+    const revision = ++listRevision.current;
+    const items = await api("/projects");
+    if (revision === listRevision.current) setProjects(items);
+    return items as {id:string;title:string}[];
   }
   function applySnapshot(next: Project) {
     if (selection.current !== next.id) return;
@@ -574,7 +576,8 @@ export default function App() {
       const p = await api("/projects/" + id);
       if (selection.current === id) {
         applySnapshot(p);
-        localStorage.setItem("atoms:last", id);
+        rememberProject(userID, id);
+        history.replaceState(null, "", "/?project=" + id);
       }
     } catch (e) {
       setError(String((e as Error).message));
@@ -585,15 +588,29 @@ export default function App() {
     applySnapshot(p);
   }
   useEffect(() => {
-    fetch("/api/bootstrap")
-      .then((r) => r.json())
-      .then(async (b) => {
-        setBoot(b);
-        await list();
-        const id = localStorage.getItem("atoms:last");
-        if (id) await open(id);
-      })
-      .catch(() => setError("暂时无法连接服务，请刷新页面重试。"));
+    let live = true;
+    list().then(async items => {
+      if (!live) return;
+      let legacy: string | null = null;
+      try { legacy = localStorage.getItem("atoms:last"); localStorage.removeItem("atoms:last"); } catch { /* Optional storage. */ }
+      const id = new URLSearchParams(location.search).get("project") || initialDraft?.project || recentProject(userID) || legacy;
+      if (id && items.some(item => item.id === id)) await open(id);
+      else if (id) { rememberProject(userID, ""); history.replaceState(null, "", "/"); }
+      if (live) setInitialized(true);
+    }).catch(e => { if (live && e.name !== "AbortError") setError(e.message); });
+    return () => {live = false;};
+  }, []);
+  useEffect(() => {
+    if (initialized) saveDraft({user:userID, text, mode, project:project?.id});
+  }, [userID, text, mode, project?.id, initialized]);
+  useEffect(() => {
+    const missing = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      setProjects(items => items.filter(item => item.id !== id));
+      if (selection.current === id) { newProject(); setError("项目已被删除，已返回新建页面。"); }
+    };
+    window.addEventListener("atoms:project-missing", missing);
+    return () => window.removeEventListener("atoms:project-missing", missing);
   }, []);
   useEffect(() => {
     if (!project?.id) return;
@@ -614,7 +631,12 @@ export default function App() {
       setStreamState("");
       update();
     };
-    es.onerror = () => setStreamState("连接恢复中，后台任务仍会继续");
+    es.onerror = () => {
+      setStreamState("连接恢复中，后台任务仍会继续");
+      apiJSON("/projects/" + id).then(applySnapshot).catch(e => {
+        if (e.status === 401 || e.status === 404 || e.name === "AbortError") es.close();
+      });
+    };
     return () => {
       es.close();
       if (timer) clearTimeout(timer);
@@ -658,7 +680,7 @@ export default function App() {
       `/projects/${project.id}/files?path=${encodeURIComponent(path)}&version=${previous.id}`,
     ).then((r) => {
       if (live) setOldContent(r.content);
-    });
+    }).catch(e => { if (live && e.name !== "AbortError") setError(e.message); });
     return () => {
       live = false;
     };
@@ -712,7 +734,8 @@ export default function App() {
         p = await api("/projects", { title: text.trim().slice(0, 28) });
         selection.current = p!.id;
         setProject(p);
-        localStorage.setItem("atoms:last", p!.id);
+        rememberProject(userID, p!.id);
+        history.replaceState(null, "", "/?project=" + p!.id);
       } catch (e) {
         setError((e as Error).message);
         setBusy(false);
@@ -730,7 +753,8 @@ export default function App() {
         p = await api("/projects", { title: "数据分析项目" });
         selection.current = p!.id;
         setProject(p);
-        localStorage.setItem("atoms:last", p!.id);
+        rememberProject(userID, p!.id);
+        history.replaceState(null, "", "/?project=" + p!.id);
       }
       const result = await api("/projects/" + p!.id + "/inputs", {
         name: inputName,
@@ -750,11 +774,14 @@ export default function App() {
     setMobileNav(false);
     selection.current = "";
     setProject(undefined);
+    setInputOpen(false); setConfirm(undefined); setRename(undefined);
+    setContent(""); setOldContent(""); retry.current = undefined;
     setVersion("");
     setPath("");
     setText("");
     setError("");
-    localStorage.removeItem("atoms:last");
+    rememberProject(userID, "");
+    history.replaceState(null, "", "/");
     setPane("chat");
   }
   const unfinished =
@@ -854,30 +881,29 @@ export default function App() {
           <Plus size={18} /> 新建项目
         </button>
         <div className="section-label">
-          你的工作空间 <span>{projects.length}</span>
+          共享工作空间 <span>{projects.length}</span>
         </div>
         <nav>
           {projects.map((p) => (
-            <button
+            <div className="project-row" key={p.id}><button
               className={p.id === project?.id ? "project active" : "project"}
-              key={p.id}
               onClick={() => open(p.id)}
             >
               <FolderOpen size={16} />
               <span>{p.title}</span>
               <ChevronRight size={14} />
-            </button>
+            </button><button className="project-delete" aria-label={`删除项目：${p.title}`} title="删除整个项目与历史" onClick={() => setDeleting(p)}><Trash2 size={15}/></button></div>
           ))}
         </nav>
         <div className="sidebar-bottom">
           <div className="availability">
             <i className={boot?.model_ready ? "green" : ""} />
-            {boot?.model_ready ? "模型服务已配置" : "模型服务待配置"}
+            {boot?.model_ready ? "模型服务已配置" : "演示可用 · 模型服务待配置"}
           </div>
           <div className="profile">
             <span>L</span>
             <div>
-              我的工作区<small>保存在当前浏览器凭证下</small>
+              {boot?.user?.username}<small>所有账号共享项目</small>
             </div>
           </div>
         </div>
@@ -912,6 +938,7 @@ export default function App() {
             {project?.title || "新想法"}
           </button>
           <div className="top-right">
+            <AccountMenu />
             <span className={"status " + (running ? "working" : "")}>
               {task ? statusText[task.status] || task.status : "创作工作台"}
             </span>
@@ -960,6 +987,7 @@ export default function App() {
               <br className="small-only" /> Products out<span>.</span>
             </h1>
             <p className="intro">和你的 AI 团队一起，把想法变成真正的作品。</p>
+            <Catalog csrf={boot?.csrf||''} onOpen={async id=>{await list();await open(id);setPane('work');setTab('preview');}}/>
             {composer}
             <div className="mode-explain">
               <Sparkles size={14} />
@@ -1015,6 +1043,9 @@ export default function App() {
                 产物工作区 <span>{files.length}</span>
               </button>
             </div>
+            {project.source && <div className="source-banner">{project.source.kind==='fallback'?'演示模式 · 原需求尚未完成，只提供预置功能':'预置示例副本 · 可交互、可保存，可继续提出修改要求'}</div>}
+            {project.recovery && <div className="source-banner">{project.recovery.unavailable ? '演示副本已删除，原任务与成果仍保留。' : '演示应用已就绪，原需求尚未完成。'}<button disabled={project.recovery.unavailable} onClick={async()=>{await list();await open(project.recovery!.project_id);setPane('work');setTab('preview');}}>{project.recovery.unavailable ? '副本已删除' : '打开演示应用'}</button></div>}
+            {task?.status==='failed' && project.head && <div className="source-banner">本次修改未完成，之前的成功版本和应用数据已保留。<button onClick={()=>{setVersion(project.head!);setPath('index.html');setPane('work');setTab('preview');}}>查看上一可用版本</button></div>}
             <div className={"workspace show-" + pane}>
               <section className="conversation">
                 <div className="conversation-heading">
@@ -1195,14 +1226,16 @@ export default function App() {
                           </option>
                         ))}
                     </select>
-                    <a
+                    <button
                       className="icon"
                       aria-label="下载所选产物"
                       title="下载所选产物 ZIP"
-                      href={`/api/projects/${project.id}/export?version=${version}`}
+                      onClick={() => downloadFile(`/projects/${project.id}/export?version=${version}`, `${project.title}.zip`).catch(e => setError(e.message))}
                     >
                       <Download size={17} />
-                    </a>
+                    </button>
+                    <button className="share-button" onClick={() => downloadFile(`/projects/${project.id}/export?version=${version}&format=html`, `${project.title}.html`).catch(e => setError(e.message))}>下载 HTML</button>
+                    <SharePanel key={project.id} projectId={project.id} version={version}/>
                   </div>
                 </div>
                 <div className="artifact-meta">
@@ -1265,13 +1298,13 @@ export default function App() {
                         ))}
                       </select>
                       <span>{manifest[path] ? `${manifest[path].size.toLocaleString()} B` : "已删除"}</span>
-                      {manifest[path] && <a
-                        href={`/api/projects/${project.id}/files?path=${encodeURIComponent(path)}&version=${version}&download=1`}
+                      {manifest[path] && <button
+                        onClick={() => downloadFile(`/projects/${project.id}/files?path=${encodeURIComponent(path)}&version=${version}&download=1`, path.split('/').pop() || 'file').catch(e => setError(e.message))}
                         title="下载该文件"
                         aria-label="下载该文件"
                       >
                         <Download size={14} />
-                      </a>}
+                      </button>}
                     </div>
                     {tab === "history" ? (
                       <div className="history-view">
@@ -1330,11 +1363,9 @@ export default function App() {
                       <div
                         className={"preview-wrap " + (mobile ? "mobile" : "")}
                       >
-                        <iframe
-                          title="生成产物预览"
-                          sandbox="allow-scripts allow-forms"
-                          key={`${version}-${refresh}-${files.map(name => name + manifest[name]?.hash).join("|")}`}
-                          src={`/api/projects/${project.id}/preview?version=${version}`}
+                        <AppPreview
+                          key={`${project.id}-${boot!.csrf}-${version}-${refresh}-${files.map(name => name + manifest[name]?.hash).join("|")}`}
+                          projectId={project.id} version={version} csrf={boot!.csrf}
                         />
                       </div>
                     ) : path.endsWith(".md") ? (
@@ -1398,6 +1429,14 @@ export default function App() {
           </>
         )}
       </main>
+      {deleting && <DeleteProjectDialog project={deleting} onCancel={() => setDeleting(undefined)} onDeleted={id => {
+        setDeleting(undefined);
+        setProjects(items => items.filter(item => item.id !== id));
+        if (selection.current === id) newProject();
+        else if (project?.recovery?.project_id === id) setProject({...project, recovery:{...project.recovery, unavailable:true}});
+        if (recentProject(userID) === id) rememberProject(userID, "");
+        void list().catch(e => { if (e.name !== 'AbortError') setError(e.message); });
+      }}/>}
       {rename && (
         <div className="modal-backdrop">
           <section className="modal compact" role="dialog" aria-modal="true" aria-label="重命名项目">

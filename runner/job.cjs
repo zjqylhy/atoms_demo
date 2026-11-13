@@ -301,7 +301,7 @@ async function goProject() {
       job.action === "test_preview",
       check,
       // Assertions can refer only to files in this registered execution input.
-      { inputPaths: Object.keys(job.files) },
+      { inputPaths: Object.keys(job.files), initialState: job.files['atoms.app.json'] ? JSON.parse(job.files['atoms.app.json']).initial_state : {} },
     );
   } else throw Error("不支持的执行动作");
   details.elapsed_ms = Date.now() - start;

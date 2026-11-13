@@ -1,0 +1,56 @@
+{
+  "release": "/opt/atoms_lab/releases/20261113T125035Z",
+  "previous": "/opt/atoms_lab/releases/20261113T070510Z",
+  "source_commit": "311ff5a96572bc8f2c7da8d7098426e263805635",
+  "activated_at": "2026-11-13T20:53:55.872954+08:00",
+  "domain": "atoms.linhengyi.xyz",
+  "binary_sha256": "d926ac72faf4d0e3223111e4a80bbcb7681ad9aeb9ff8ec416e2122c38e5aa6a",
+  "archive_sha256": "7236214ede808c73e5ff4b4aaca025e5933389b978f75e5d4c25b35990a8aa59",
+  "runner_image": "sha256:9ebcf6ec954ce485cce37eb90035d02c2f6925159c2f1b605b6b248a16a5bc7e",
+  "database_backup": "/opt/atoms_lab/backups/20261113T125353Z.db",
+  "backup_sha256": "9cec29cbae8660f417db1571962146821f97813e4960c852152646a8124a3791",
+  "retained": {
+    "projects": 7,
+    "blobs": 203,
+    "workspaces": 19,
+    "quota_rows": 5
+  },
+  "public_files": {
+    "assets/index-B9ER99_X.css": "b78ae7719ec99975963ff0c438d9d73006da188ed0c69eed758c0758aa65ca3e",
+    "assets/index-zyza8bUf.js": "ad39962fc7dc0bb4353b8815119870206e884bde9939e92052ea3f0bb4709c10",
+    "index.html": "6a71d94849aae364f09d1df15c8b929d950ef9f3b2066c181801faa41438c30c"
+  },
+  "health": {
+    "app": 200,
+    "runner": 200,
+    "public": 200
+  },
+  "existing_containers": 10,
+  "existing_containers_unchanged": true,
+  "app_env_only_trusted_proxy_added": true,
+  "runner_env_only_image_changed": true,
+  "public_browser": {
+    "status": "passed",
+    "checks": 6,
+    "restart": {
+      "restart": "passed",
+      "at": "2026-11-13T20:56:45.414493+08:00",
+      "web_pid_before": "2935850",
+      "web_pid_after": "2940005",
+      "runner_unchanged": true
+    }
+  },
+  "runsc_job": "0e09a5e74a1875d2bf892924980e47d45b7e5ad0d61b8cdb53d5709663828ef7",
+  "runsc_status": "passed",
+  "job_lookup_and_idempotence": "passed",
+  "backup_restore": {
+    "backup": "/opt/atoms_lab/staging/acceptance-20261113T124418Z/post-deploy-backups/20261113T125729469526Z.db",
+    "table_count": 15,
+    "all_table_rows_equal": true,
+    "restored_binary_startup": "passed",
+    "restored_app_states_unchanged": true,
+    "legacy_rollback_rejected": true
+  },
+  "model_calls": 0,
+  "call_quota_unchanged": true
+}

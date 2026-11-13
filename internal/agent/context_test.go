@@ -171,7 +171,7 @@ func TestContinuePersistsCompactionWithoutReplayingTools(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			started, err := e.Start("alice", created.ID, "", "build", "continue-test", "continue", "")
+			started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", created.ID, "", "build", "continue-test", "continue", "")
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -289,7 +289,15 @@ type Checkpoint struct {
 	Manifest Manifest `json:"manifest"`
 	StepID   string   `json:"step_id"`
 }
+
+// RunActor separates who consumes a run's quota from where shared files live.
+type RunActor struct {
+	UserID    string `json:"user_id,omitempty"`
+	Workspace string `json:"workspace"`
+}
+
 type Run struct {
+	Actor         *RunActor      `json:"actor,omitempty"`
 	ID            string         `json:"id"`
 	TaskID        string         `json:"task_id"`
 	Epoch         int64          `json:"epoch"`
@@ -376,6 +384,8 @@ type Event struct {
 	Data any    `json:"data,omitempty"`
 }
 type Project struct {
+	Source      *ProjectSource    `json:"source,omitempty"`
+	Recovery    *DemoRecovery     `json:"recovery,omitempty"`
 	ID          string            `json:"id"`
 	Owner       string            `json:"owner"`
 	Title       string            `json:"title"`
@@ -432,7 +442,7 @@ func (p *Project) Public() any {
 		versions[i].PreviewReady = PreviewHTML(versions[i].Reports, versions[i].Manifest) != ""
 		versions[i].Reports = publicReports(versions[i].Reports)
 	}
-	return map[string]any{"id": p.ID, "preview_ready": PreviewHTML(p.Reports, p.Files) != "", "title": p.Title, "created": p.Created, "updated": p.Updated, "active_run": p.ActiveRun, "current_task": p.CurrentTask, "head": p.Head, "files": p.Files, "messages": p.Messages, "tasks": tasks, "runs": runs, "versions": versions, "reports": publicReports(p.Reports), "events": publicEvents(p.Events)}
+	return map[string]any{"id": p.ID, "source": p.Source, "recovery": p.Recovery, "preview_ready": PreviewHTML(p.Reports, p.Files) != "", "title": p.Title, "created": p.Created, "updated": p.Updated, "active_run": p.ActiveRun, "current_task": p.CurrentTask, "head": p.Head, "files": p.Files, "messages": p.Messages, "tasks": tasks, "runs": runs, "versions": versions, "reports": publicReports(p.Reports), "events": publicEvents(p.Events)}
 }
 
 func publicReports(reports []Report) []Report {

@@ -1,0 +1,60 @@
+{
+  "release": "/opt/atoms_lab/releases/20261113T143142Z",
+  "previous": "/opt/atoms_lab/releases/20261113T125035Z",
+  "source_commit": "fdcdb5181d6cfb5874b46c6d5594f0a69b2bb2d2",
+  "activated_at": "2026-11-13T22:35:25.909750+08:00",
+  "domain": "atoms.linhengyi.xyz",
+  "archive_sha256": "666a7c5094fdbbf8ee58e7c29817406fd53886a7335135049690eba2ee89defe",
+  "binary_sha256": "f8301dbd3dd249844514a161bdcb5d0ef3d2da80f6ecc84ae06d1be53cd9d554",
+  "database_backup": "/opt/atoms_lab/backups/20261113T143523769242Z.db",
+  "backup_sha256": "cfd09a53eec573cd63e14049607c337330f9b4197bc8eea389a78afacd1afe5a",
+  "post_verification_backup": "/opt/atoms_lab/backups/20261113T144315503227Z.db",
+  "historical_projects_preserved": 9,
+  "original_rows_preserved": {
+    "blobs": 213,
+    "users": 2,
+    "workspaces": 25,
+    "workspace_accounts": 4,
+    "app_states": 2,
+    "app_backups": 0,
+    "app_receipts": 2,
+    "share_links": 2,
+    "call_quota": 5
+  },
+  "project_state_only_updated_changed_at_activation": true,
+  "public_assets": {
+    "assets/index-DhCg1GBD.js": "14e73799e18dced90ba83b103d0093d02a275e2b1e12f03d4946f49cb17e251b",
+    "assets/index-kVckUsM2.css": "336d246e6cedb3acb667d6774c6b74910602cd1654b9b9aed94b22d4ae469704",
+    "index.html": "d20a6f72dc76fe03e0714ac3b18c0342aa111c138e00ff1375ad169ea4696510"
+  },
+  "public_browser": {
+    "status": "passed",
+    "checks": 7,
+    "viewports": [
+      1440,
+      390
+    ]
+  },
+  "public_anonymous_api_checks": 5,
+  "production_copy_migration": "passed",
+  "test_projects_remaining": 0,
+  "test_project_app_data_and_shares_cleaned": true,
+  "test_accounts_created": 6,
+  "active_test_account_sessions": 0,
+  "runner_image": "sha256:9ebcf6ec954ce485cce37eb90035d02c2f6925159c2f1b605b6b248a16a5bc7e",
+  "environments_unchanged": true,
+  "other_containers_unchanged": 10,
+  "health": {
+    "app": 200,
+    "runner": 200,
+    "public": 200
+  },
+  "model_calls": 0,
+  "call_quota_unchanged": true,
+  "notes": [
+    "Copy receipts are scoped to session_hash and request_id. The first public test crossed a login boundary; its new test copy was identified and deleted.",
+    "A subsequent browser check raced the intentional SSE logout teardown; the check now waits for the login page and validates the download API directly.",
+    "Six acceptance account records remain; their sessions are revoked and passwords were generated only in memory. No pre-existing account or project was deleted.",
+    "No new sandbox execution or paid model call was required for this release."
+  ]
+}

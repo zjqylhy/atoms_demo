@@ -1,5 +1,6 @@
 """Run on the audited host after acceptance. Read secrets from stdin, never argv."""
 import json
+import ipaddress
 import os
 from pathlib import Path
 import pwd
@@ -20,6 +21,7 @@ config = json.load(sys.stdin)
 api_key = config['api_key']
 if not api_key or any(c in api_key for c in '\r\n\x00'):
     raise SystemExit('Invalid credential')
+trusted_proxy_ips = ','.join(str(ipaddress.ip_address(value.strip())) for value in config.get('trusted_proxy_ips', '').split(',') if value.strip())
 image_id = json.loads(subprocess.check_output(['docker', 'image', 'inspect', 'atoms-runner:local']))[0]['Id']
 runtime = json.loads(subprocess.check_output(['docker', 'info', '--format', '{{json .Runtimes}}']))
 if 'runsc' not in runtime:
@@ -37,11 +39,12 @@ env_dir.mkdir(mode=0o700, exist_ok=True)
 runner_token = secrets.token_hex(32)
 app = {
     'ATOMS_ADDR': '172.18.0.1:8090', 'ATOMS_DATA_DIR': str(root / 'data'),
-    'ATOMS_WEB_DIR': str(root / 'current/web/dist'), 'ATOMS_PUBLIC_URL': 'https://atoms.linhengyi.xyz',
+    'ATOMS_WEB_DIR': str(root / 'current/web/dist'), 'ATOMS_PUBLIC_URL': 'https://atoms.linhengyi.xyz', 'ATOMS_TRUST_PROXY': '1',
+    'ATOMS_TRUSTED_PROXY_IPS': trusted_proxy_ips,
     'ATOMS_LLM_BASE_URL': 'https://api.linhengyi.xyz/v1', 'ATOMS_LLM_MODEL': 'chat',
     'ATOMS_LLM_PROTOCOL': 'chat_completions', 'ATOMS_LLM_TOOL_MODE': 'json',
     'ATOMS_LLM_CONFIG_REVISION': 'gateway-chat-json-v3', 'ATOMS_LLM_API_KEY': api_key,
-    'ATOMS_MAX_OUTPUT_TOKENS': '8192', 'ATOMS_LLM_TPM': '40000',
+    'ATOMS_MAX_OUTPUT_TOKENS': '81920', 'ATOMS_LLM_TPM': '1000000',
     'ATOMS_RUN_SECONDS': '1200',
     'ATOMS_MAX_CONCURRENT': '1', 'ATOMS_DAILY_CALLS': '2000', 'ATOMS_WORKSPACE_DAILY_CALLS': '1000',
     'ATOMS_RUNNER_URL': 'http://127.0.0.1:8091', 'ATOMS_RUNNER_TOKEN': runner_token,

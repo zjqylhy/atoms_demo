@@ -1,0 +1,3 @@
+internal/appruntime/*.js text eol=lf
+internal/catalog/source/* text eol=lf
+internal/catalog/bundles/*.json text eol=lf

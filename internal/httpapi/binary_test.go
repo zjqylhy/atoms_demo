@@ -68,7 +68,7 @@ func testBinaryDownload(t *testing.T, data []byte, name string) {
 	}
 	engine := agent.New(db, config.Config{MaxCalls: 2, MaxTools: 5, MaxConcurrent: 1, RunSeconds: 5}, pauseBinaryModel{})
 	defer engine.Shutdown()
-	if _, err := engine.Start("owner", p.ID, "", "build", "continue", "continue", ""); err != nil {
+	if _, err := engine.Start(core.RunActor{Workspace: "owner"}, "owner", p.ID, "", "build", "continue", "continue", ""); err != nil {
 		t.Fatal(err)
 	}
 	for deadline := time.Now().Add(3 * time.Second); ; {

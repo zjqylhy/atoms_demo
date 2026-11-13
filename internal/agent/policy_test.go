@@ -62,7 +62,7 @@ func TestReassignRenameAndContinueDoNotReopenBlindRetry(t *testing.T) {
 	e.Config.RepeatFailures = 2
 	e.Config.ReplanBudget = 2
 	for _, action := range []string{"submit", "continue"} {
-		_, err := e.Start("alice", p.ID, "核对缺少输入", "build", action, action, "")
+		_, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "核对缺少输入", "build", action, action, "")
 		if err != nil {
 			t.Fatal(err)
 		}

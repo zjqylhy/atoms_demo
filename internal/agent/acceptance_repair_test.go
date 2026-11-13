@@ -268,7 +268,7 @@ func TestCompletionLoopStopsAcrossContinueWithChangingSummary(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, action := range []string{"submit", "continue"} {
-		if _, err := e.Start("alice", p.ID, "deliver artifact", "build", action, action, ""); err != nil {
+		if _, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "deliver artifact", "build", action, action, ""); err != nil {
 			t.Fatal(err)
 		}
 		p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.ActiveRun == "" })
@@ -298,7 +298,7 @@ func TestCompletionLoopStopsAcrossContinueWithChangingSummary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = e.Start("alice", p.ID, "", "build", "repaired", "continue", ""); err != nil {
+	if _, err = e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "build", "repaired", "continue", ""); err != nil {
 		t.Fatal(err)
 	}
 	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.ActiveRun == "" })

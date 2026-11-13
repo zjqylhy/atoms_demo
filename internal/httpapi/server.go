@@ -2,14 +2,13 @@ package httpapi
 
 import (
 	"archive/zip"
-	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
 	"mockatoms/internal/agent"
+	"mockatoms/internal/appruntime"
 	"mockatoms/internal/config"
 	"mockatoms/internal/core"
 	"mockatoms/internal/store"
@@ -42,18 +41,36 @@ func New(s *store.Store, e *agent.Engine, c config.Config) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) { send(w, 200, map[string]any{"ok": true}) })
 	mux.HandleFunc("GET /api/bootstrap", app.bootstrap)
+	mux.HandleFunc("GET /api/catalog", app.catalog)
+	mux.HandleFunc("POST /api/catalog/{template}/copy", app.copyPreset)
+	mux.HandleFunc("GET /api/shares/{token}", app.publicShare)
+	mux.HandleFunc("GET /api/shares/{token}/{view}", app.publicShare)
+	mux.HandleFunc("POST /api/shares/{token}/copy", app.copyShare)
+	mux.HandleFunc("GET /api/auth/me", app.bootstrap)
+	mux.HandleFunc("POST /api/auth/register", app.authenticate)
+	mux.HandleFunc("POST /api/auth/login", app.authenticate)
+	mux.HandleFunc("POST /api/auth/logout", app.logout)
 	mux.HandleFunc("GET /api/projects", app.projects)
 	mux.HandleFunc("POST /api/projects", app.projects)
 	mux.HandleFunc("GET /api/projects/{id}", app.project)
 	mux.HandleFunc("PATCH /api/projects/{id}", app.project)
+	mux.HandleFunc("DELETE /api/projects/{id}", app.deleteProject)
 	mux.HandleFunc("POST /api/projects/{id}/actions", app.action)
 	mux.HandleFunc("POST /api/projects/{id}/inputs", app.input)
 	mux.HandleFunc("GET /api/projects/{id}/files", app.file)
 	mux.HandleFunc("GET /api/projects/{id}/export", app.export)
 	mux.HandleFunc("GET /api/projects/{id}/preview", app.preview)
+	mux.HandleFunc("POST /api/projects/{id}/preview-access", app.previewAccess)
+	mux.HandleFunc("GET /api/projects/{id}/app-state", app.appState)
+	mux.HandleFunc("PUT /api/projects/{id}/app-state", app.appState)
+	mux.HandleFunc("POST /api/projects/{id}/app-state/reset", app.resetAppState)
+	mux.HandleFunc("GET /api/projects/{id}/app-backups", app.appBackups)
+	mux.HandleFunc("GET /api/projects/{id}/shares", app.shares)
+	mux.HandleFunc("POST /api/projects/{id}/shares", app.shares)
+	mux.HandleFunc("DELETE /api/projects/{id}/shares/{share}", app.shares)
 	mux.HandleFunc("GET /api/projects/{id}/events", app.events)
 	mux.HandleFunc("/", app.static)
-	return app.middleware(mux)
+	return app.sessionMiddleware(mux)
 }
 func send(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -62,7 +79,33 @@ func send(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 func (s *Server) fail(w http.ResponseWriter, status int, err error) {
+	if errors.Is(err, store.ErrSession) {
+		s.failCode(w, 401, "login_required", store.ErrSession.Error())
+		return
+	}
 	send(w, status, map[string]any{"error": s.Config.Redact(err.Error())})
+}
+func (s *Server) failCode(w http.ResponseWriter, status int, code, message string) {
+	send(w, status, map[string]string{"code": code, "error": s.Config.Redact(message)})
+}
+func (s *Server) projectFailure(w http.ResponseWriter, err error) {
+	if errors.Is(err, core.ErrNotFound) {
+		s.failCode(w, 404, "project_not_found", "项目不存在或已被删除")
+		return
+	}
+	s.fail(w, 503, err)
+}
+func (s *Server) deleteProject(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := s.Engine.DeleteProject(sessionOf(r).TokenHash, id); err != nil {
+		if errors.Is(err, store.ErrProjectRunning) {
+			s.failCode(w, 409, "project_running", err.Error())
+		} else {
+			s.projectFailure(w, err)
+		}
+		return
+	}
+	send(w, 200, map[string]any{"deleted": true, "id": id})
 }
 func owner(r *http.Request) string { v, _ := r.Context().Value(ctxKey("owner")).(string); return v }
 func csrf(token string) string     { return core.Hash([]byte("atoms-csrf:" + token)) }
@@ -78,95 +121,34 @@ func decode(r *http.Request, v any) error {
 	}
 	return nil
 }
-func (s *Server) middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "same-origin")
-		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		if !strings.HasPrefix(r.URL.Path, "/api/") {
-			next.ServeHTTP(w, r)
-			return
-		}
-		r.Body = http.MaxBytesReader(w, r.Body, 3*1024*1024)
-		cookieName := "atoms_session"
-		secure := strings.HasPrefix(s.Config.PublicURL, "https://") || r.TLS != nil
-		if secure {
-			cookieName = "__Host-atoms_session"
-		}
-		cookie, err := r.Cookie(cookieName)
-		if err != nil || len(cookie.Value) != 64 {
-			if r.URL.Path != "/api/bootstrap" {
-				s.fail(w, 401, errors.New("请刷新页面建立工作区"))
-				return
-			}
-			cookie = &http.Cookie{Name: cookieName, Value: core.ID() + core.ID(), Path: "/", HttpOnly: true, Secure: secure, SameSite: http.SameSiteLaxMode, MaxAge: 365 * 24 * 3600}
-			http.SetCookie(w, cookie)
-		}
-		id, err := s.Store.Workspace(cookie.Value, r.URL.Path == "/api/bootstrap")
-		if err != nil {
-			s.fail(w, 401, errors.New("工作区会话无效，请清除本站 Cookie 后重新打开"))
-			return
-		}
-		if r.Method != "GET" && r.Method != "HEAD" {
-			origin := r.Header.Get("Origin")
-			validOrigin := "http://" + r.Host
-			if r.TLS != nil {
-				validOrigin = "https://" + r.Host
-			}
-			if origin != "" && origin != validOrigin && origin != s.Config.PublicURL {
-				s.fail(w, 403, errors.New("请求来源无效"))
-				return
-			}
-			if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-CSRF-Token")), []byte(csrf(cookie.Value))) != 1 {
-				s.fail(w, 403, errors.New("请求校验失败，请刷新页面"))
-				return
-			}
-			s.mu.Lock()
-			now := time.Now()
-			limit := s.rates[id]
-			if now.Sub(limit.At) > time.Minute {
-				limit = window{At: now}
-			}
-			limit.Count++
-			s.rates[id] = limit
-			for key, item := range s.rates {
-				if now.Sub(item.At) > 2*time.Minute {
-					delete(s.rates, key)
-				}
-			}
-			s.mu.Unlock()
-			if limit.Count > 60 {
-				s.fail(w, 429, errors.New("操作过于频繁，请稍后重试"))
-				return
-			}
-		}
-		r = r.WithContext(context.WithValue(r.Context(), ctxKey("owner"), id))
-		r = r.WithContext(context.WithValue(r.Context(), ctxKey("csrf"), csrf(cookie.Value)))
-		next.ServeHTTP(w, r)
-	})
-}
 func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request) {
 	ready := s.Config.ModelError() == nil
-	send(w, 200, map[string]any{"csrf": r.Context().Value(ctxKey("csrf")), "model_ready": ready, "runner_configured": s.Config.RunnerURL != "" && s.Config.RunnerToken != "", "limits": map[string]any{"max_calls": s.Config.MaxCalls, "max_tools": s.Config.MaxTools, "run_seconds": s.Config.RunSeconds}, "notice": "当前浏览器保存工作区访问凭证，清除 Cookie 后无法自动找回。"})
+	if _, backupReady := s.Config.Backup(); backupReady {
+		ready = true
+	}
+	var user any
+	session := sessionOf(r)
+	notice := "请登录后使用。所有登录账号均可查看、修改和删除共享项目。"
+	if session.UserID != "" {
+		user = map[string]string{"id": session.UserID, "username": session.Username}
+		notice = "共享工作空间：所有登录账号均可查看、修改和删除项目。"
+	}
+	send(w, 200, map[string]any{"csrf": r.Context().Value(ctxKey("csrf")), "user": user, "model_ready": ready, "runner_configured": s.Config.RunnerURL != "" && s.Config.RunnerToken != "", "limits": map[string]any{"max_calls": s.Config.MaxCalls, "max_tools": s.Config.MaxTools, "run_seconds": s.Config.RunSeconds}, "notice": notice})
 }
 func (s *Server) projects(w http.ResponseWriter, r *http.Request) {
-	list, err := s.Store.List(owner(r))
-	if err != nil {
-		s.fail(w, 500, errors.New("无法读取项目"))
-		return
-	}
-	if r.Method == "GET" {
+	if readMethod(r) {
+		list, err := s.Store.SharedProjects(sessionOf(r).TokenHash)
+		if err != nil {
+			s.fail(w, 503, err)
+			return
+		}
 		send(w, 200, list)
-		return
-	}
-	if len(list) >= 30 {
-		s.fail(w, 409, errors.New("当前工作区最多 30 个项目"))
 		return
 	}
 	var body struct {
 		Title string `json:"title"`
 	}
-	if err = decode(r, &body); err != nil {
+	if err := decode(r, &body); err != nil {
 		s.fail(w, 400, err)
 		return
 	}
@@ -258,7 +240,9 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 		if body.Action == "answer" {
 			decisionID = body.QuestionID
 		}
-		p, err = s.Engine.Start(owner(r), id, body.Text, body.Mode, body.RequestID, body.Action, decisionID)
+		session := sessionOf(r)
+		actor := core.RunActor{UserID: session.UserID, Workspace: session.Workspace}
+		p, err = s.Engine.Start(actor, owner(r), id, body.Text, body.Mode, body.RequestID, body.Action, decisionID)
 	}
 	if err != nil {
 		status := 409
@@ -375,6 +359,31 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		}
 		files[name] = data
 	}
+	var contract *core.AppContract
+	if data, ok := files[core.AppContractPath]; ok {
+		parsed, err := core.ParseAppContract(data)
+		if err != nil {
+			s.fail(w, 400, err)
+			return
+		}
+		contract = &parsed
+	}
+	markup := core.PreviewHTML(p.Reports, manifest)
+	if r.URL.Query().Get("format") == "html" {
+		if markup == "" {
+			s.fail(w, 409, errors.New("此版本没有已构建网页，请先运行检查"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Content-Disposition", `attachment; filename="atoms-app.html"`)
+		w.Header().Set("Cache-Control", "no-store")
+		_, _ = io.WriteString(w, appruntime.Offline(markup, contract))
+		return
+	}
+	if markup != "" {
+		files["atoms-standalone.html"] = []byte(appruntime.Offline(markup, contract))
+		files["ATOMS-EXPORT.txt"] = []byte("源码及构建网页导出。atoms-standalone.html 可直接打开，无需安装依赖。默认仅带应用种子数据，不包含服务端业务记录。离线修改不会同步服务端，请用页面的数据 JSON 导出/导入功能备份。")
+	}
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": "atoms-project.zip"}))
 	w.Header().Set("Cache-Control", "no-store")
@@ -403,6 +412,9 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 	if markup == "" {
 		s.fail(w, 404, errors.New("尚未生成可预览构建，请查看文件或继续执行"))
 		return
+	}
+	if _, ok := manifest[core.AppContractPath]; ok {
+		markup = appruntime.Inject(markup)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
@@ -438,6 +450,9 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
+			if !s.Store.AccountSessionValid(sessionOf(r).TokenHash) {
+				return
+			}
 			p, err := s.Store.Get(owner(r), id)
 			if err != nil {
 				return

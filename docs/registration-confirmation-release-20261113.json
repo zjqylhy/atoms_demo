@@ -1,0 +1,55 @@
+{
+  "release": "/opt/atoms_lab/releases/20261113T145942Z",
+  "previous": "/opt/atoms_lab/releases/20261113T143142Z",
+  "source_commit": "defb45b2dba9864f929a11c915ba1d5e3e386f2d",
+  "backend_source_commit": "fdcdb5181d6cfb5874b46c6d5594f0a69b2bb2d2",
+  "activation": "static-only atomic symlink switch",
+  "activated_at": "2026-11-13T15:00:42.145965+00:00",
+  "archive_sha256": "f1172acd01bd0516339986803a39683492bb413d7aef33b51d10d20403cef38f",
+  "binary_sha256": "f8301dbd3dd249844514a161bdcb5d0ef3d2da80f6ecc84ae06d1be53cd9d554",
+  "database_backup": "/opt/atoms_lab/backups/20261113T150041471635Z.db",
+  "services_not_restarted": true,
+  "database_unchanged_at_activation": true,
+  "environments_unchanged": true,
+  "other_containers_unchanged": 10,
+  "health": {
+    "app": 200,
+    "runner": 200,
+    "public": 200
+  },
+  "model_calls": 0,
+  "projects_preserved": 6,
+  "business_tables_unchanged": true,
+  "guest_tables_changed": [
+    "sessions",
+    "workspaces"
+  ],
+  "runner_image": "sha256:9ebcf6ec954ce485cce37eb90035d02c2f6925159c2f1b605b6b248a16a5bc7e",
+  "domain": "atoms.linhengyi.xyz",
+  "public_browser": {
+    "status": "passed",
+    "checks": 5,
+    "viewports": [
+      1440,
+      390
+    ]
+  },
+  "production_accounts_created": 0,
+  "registration_posts_intercepted": 1,
+  "local_checks": {
+    "login_shared_deletion": 12,
+    "existing_application": 11,
+    "production_build": "passed"
+  },
+  "public_assets": {
+    "assets/index-BSxKzcLg.js": "14fd81717b8805e12e5be4cb0bf51fabecfe8dbd539f4148f9d222dca7b500a7",
+    "assets/index-DhCg1GBD.js": "14e73799e18dced90ba83b103d0093d02a275e2b1e12f03d4946f49cb17e251b",
+    "assets/index-kVckUsM2.css": "336d246e6cedb3acb667d6774c6b74910602cd1654b9b9aed94b22d4ae469704",
+    "index.html": "d54225bc760fa7903ee1a2c0aa9e7835e835960ebac2a451150143054c582b0f"
+  },
+  "notes": [
+    "Only static frontend files changed. Backend and runner bytes are identical to the previous release; both service PIDs remained unchanged.",
+    "Production registration requests were intercepted before delivery. Successful real registration was verified with isolated local data.",
+    "Original business tables were unchanged between preactivation and final verification. Anonymous page loading added guest workspace/session records."
+  ]
+}

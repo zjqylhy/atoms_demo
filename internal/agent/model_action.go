@@ -24,7 +24,11 @@ func (e *Engine) beginModelCall(s scope, role string, prepared preparedContext) 
 	if p.Runs[s.Run].Calls >= e.Config.MaxCalls {
 		return errors.New("达到本次模型调用上限，进度已保存")
 	}
-	if err := e.Quota.ReserveCall(s.Owner, e.Config.DailyCalls, e.Config.WorkspaceDailyCalls); err != nil {
+	chargeWorkspace := s.Owner
+	if actor := p.Runs[s.Run].Actor; actor != nil {
+		chargeWorkspace = actor.Workspace
+	}
+	if err := e.Quota.ReserveCall(chargeWorkspace, e.Config.DailyCalls, e.Config.WorkspaceDailyCalls); err != nil {
 		return err
 	}
 	_, err = e.Store.Mutate(s.Owner, s.Project, nil, func(p *core.Project) error {
@@ -47,9 +51,9 @@ func (e *Engine) beginModelCall(s scope, role string, prepared preparedContext) 
 		}
 		p.Runs[s.Run].Usage.Known = false
 		if prepared.dialogue != nil {
-			p.Event("model_call", role, "正在生成旧对话摘要", map[string]any{"purpose": "dialogue_summary", "request_bytes": prepared.request.ByteSize()})
+			p.Event("model_call", role, "正在生成旧对话摘要", map[string]any{"purpose": "dialogue_summary", "request_bytes": prepared.request.ByteSize(), "model": prepared.route})
 		} else {
-			p.Event("model_call", role, "正在处理", nil)
+			p.Event("model_call", role, "正在处理", map[string]any{"model": prepared.route})
 		}
 		return nil
 	})

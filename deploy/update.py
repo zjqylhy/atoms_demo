@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+from release_guard import compatible_rollback
 
 root = Path('/opt/atoms_lab')
 target = Path(sys.argv[1]).resolve()
@@ -17,6 +18,10 @@ assert target.parent == root/'releases' and re.fullmatch(r'[0-9]{8}T[0-9]{6}Z', 
 assert (target/'atoms').is_file() and Path('/etc/atoms-lab/app.env').is_file()
 assert 2 <= len(sys.argv) <= 3
 runner_image = sys.argv[2] if len(sys.argv) == 3 else None
+if (target/'deploy/data-schema.json').is_file():
+    assert runner_image, 'This release requires a verified runner image with preview data host API 1'
+    runtime_api = subprocess.check_output(['docker','image','inspect',runner_image,'--format','{{index .Config.Labels "org.atoms.preview-runtime"}}'], text=True).strip()
+    assert runtime_api == '1', 'Runner image does not include preview data host API 1'
 runner_env = Path('/etc/atoms-lab/runner.env')
 runner_env_backup = None
 runner_env_next = None
@@ -85,7 +90,10 @@ except Exception:
     subprocess.run(['systemctl','stop','atoms-web','atoms-runner'], check=True)
     if runner_env_backup is not None:
         write_runner_env(runner_env_backup.read_bytes())
-    activate(previous)
+    if compatible_rollback(previous, root/'data/atoms.db'):
+        activate(previous)
+    else:
+        raise RuntimeError('Previous release cannot preserve login, shared-project, quota and deletion semantics. Services remain stopped; use a compatible recovery build. Database has not been restored or erased.')
     raise
 receipt = json.loads((root/'release-receipt.json').read_text())
 receipt.update(release=str(target),previous=str(previous))
