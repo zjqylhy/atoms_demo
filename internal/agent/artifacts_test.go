@@ -46,7 +46,7 @@ func TestAnalysisUsesOriginalNumbersAndChartProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = e.Start("alice", p.ID, "汇总销售额并作图", "build", "start", "submit", ""); err != nil {
+	if _, err = e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "汇总销售额并作图", "build", "start", "submit", ""); err != nil {
 		t.Fatal(err)
 	}
 	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.Tasks[p.CurrentTask].Status == "completed" })

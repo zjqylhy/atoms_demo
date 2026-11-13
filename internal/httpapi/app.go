@@ -10,6 +10,9 @@ import (
 func (s *Server) appFailure(w http.ResponseWriter, err error) {
 	status := 400
 	switch {
+	case errors.Is(err, store.ErrCopyDeleted):
+		s.failCode(w, 410, "copy_deleted", err.Error())
+		return
 	case errors.Is(err, store.ErrSession):
 		status = 401
 	case errors.Is(err, core.ErrNotFound):
@@ -40,7 +43,7 @@ func (s *Server) previewAccess(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) appState(w http.ResponseWriter, r *http.Request) {
 	id, hash := r.PathValue("id"), sessionOf(r).TokenHash
-	if r.Method == "GET" {
+	if readMethod(r) {
 		state, err := s.Store.LoadAppState(hash, id, r.Header.Get("X-Preview-Grant"))
 		if err != nil {
 			s.appFailure(w, err)

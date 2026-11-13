@@ -26,8 +26,8 @@ type Engine struct {
 	active map[string]activeRun
 }
 type activeRun struct {
-	Owner  string
-	Cancel context.CancelFunc
+	ActorWorkspace string
+	Cancel         context.CancelFunc
 }
 type scope struct {
 	Owner, Project, Run, Task, Frame string
@@ -48,10 +48,27 @@ func (e *Engine) Shutdown() {
 	}
 }
 
-// Start persists admission before launching execution independent of the HTTP request.
-func (e *Engine) Start(owner, id, text, mode, requestID, action, decisionID string) (*core.Project, error) {
+// Serialize deletion with admission and stop. Active entries remain present
+// until model/tool cleanup finishes, even after the persisted run is stopped.
+func (e *Engine) DeleteProject(sessionHash, id string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if _, err := e.Store.AccountSession(sessionHash); err != nil {
+		return err
+	}
+	if _, active := e.active[id]; active {
+		return store.ErrProjectRunning
+	}
+	return e.Store.DeleteProject(sessionHash, id)
+}
+
+// Start persists admission before launching execution independent of the HTTP request.
+func (e *Engine) Start(actor core.RunActor, owner, id, text, mode, requestID, action, decisionID string) (*core.Project, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if actor.Workspace == "" {
+		return nil, errors.New("缺少运行发起账号")
+	}
 	if requestID == "" || len(requestID) > 100 {
 		return nil, errors.New("缺少有效请求标识")
 	}
@@ -68,12 +85,12 @@ func (e *Engine) Start(owner, id, text, mode, requestID, action, decisionID stri
 	if len(e.active) >= e.Config.MaxConcurrent {
 		return nil, errors.New("执行容量已满，请稍后重试")
 	}
-	principal, err := e.Store.Principal(owner)
+	principal, err := e.Store.Principal(actor.Workspace)
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range e.active {
-		other, lookupErr := e.Store.Principal(r.Owner)
+		other, lookupErr := e.Store.Principal(r.ActorWorkspace)
 		if lookupErr != nil {
 			return nil, lookupErr
 		}
@@ -165,7 +182,7 @@ func (e *Engine) Start(owner, id, text, mode, requestID, action, decisionID stri
 		p.ActiveRun = runID
 		t.Status = "running"
 		t.RunIDs = append(t.RunIDs, runID)
-		p.Runs[runID] = &core.Run{ID: runID, TaskID: t.ID, Epoch: p.Epoch, Status: "running", Started: core.Now(), Model: e.Config.Ref()}
+		p.Runs[runID] = &core.Run{Actor: &actor, ID: runID, TaskID: t.ID, Epoch: p.Epoch, Status: "running", Started: core.Now(), Model: e.Config.Ref()}
 		p.Requests[requestID] = runID
 		if t.Frames[t.Root] == nil {
 			t.Frames[t.Root] = &core.Frame{ID: t.Root, Role: "Mike", Goal: t.Goal, Messages: []core.ModelMessage{{Role: "user", Content: t.Goal}}}
@@ -177,7 +194,7 @@ func (e *Engine) Start(owner, id, text, mode, requestID, action, decisionID stri
 		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(e.Config.RunSeconds)*time.Second)
-	e.active[id] = activeRun{Owner: owner, Cancel: cancel}
+	e.active[id] = activeRun{ActorWorkspace: actor.Workspace, Cancel: cancel}
 	s := scope{Owner: owner, Project: id, Run: runID, Task: p.CurrentTask, Frame: p.Tasks[p.CurrentTask].Root, Epoch: p.Epoch}
 	go func() {
 		defer cancel()

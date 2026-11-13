@@ -92,7 +92,18 @@ func (s *Store) Get(owner, id string) (*core.Project, error) {
 	return decode(b)
 }
 func (s *Store) List(owner string) ([]map[string]any, error) {
-	rows, e := s.db.Query(`SELECT id,title,updated FROM projects WHERE owner=? OR owner IN (SELECT workspace_id FROM workspace_accounts WHERE user_id=(SELECT user_id FROM workspace_accounts WHERE workspace_id=?)) ORDER BY updated DESC`, owner, owner)
+	return s.listProjects(`SELECT id,title,updated FROM projects WHERE owner=? OR owner IN (SELECT workspace_id FROM workspace_accounts WHERE user_id=(SELECT user_id FROM workspace_accounts WHERE workspace_id=?)) ORDER BY updated DESC`, owner, owner)
+}
+
+func (s *Store) SharedProjects(sessionHash string) ([]map[string]any, error) {
+	if _, err := s.AccountSession(sessionHash); err != nil {
+		return nil, err
+	}
+	return s.listProjects(`SELECT id,title,updated FROM projects ORDER BY updated DESC,id`)
+}
+
+func (s *Store) listProjects(query string, args ...any) ([]map[string]any, error) {
+	rows, e := s.db.Query(query, args...)
 	if e != nil {
 		return nil, e
 	}

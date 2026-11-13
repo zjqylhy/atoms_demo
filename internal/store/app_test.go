@@ -36,7 +36,7 @@ func TestAppDataCommitRestartConflictReceiptAndGrantIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	token, session, _ := s.NewGuest()
+	token, session := testAccount(t, s)
 	p := appFixture(t, s, session)
 	access, err := s.PreviewAccess(session.TokenHash, p.ID, "")
 	if err != nil || access.Mode != "formal" {
@@ -102,9 +102,13 @@ func TestAppDataCommitRestartConflictReceiptAndGrantIsolation(t *testing.T) {
 	if success != 1 || conflict != 1 {
 		t.Fatal(success, conflict)
 	}
-	_, stranger, _ := s.NewGuest()
-	if _, err = s.LoadAppState(stranger.TokenHash, p.ID, access.Grant); !errors.Is(err, core.ErrNotFound) {
+	_, stranger := testAccount(t, s)
+	if _, err = s.LoadAppState(stranger.TokenHash, p.ID, access.Grant); !errors.Is(err, ErrGrant) {
 		t.Fatal("cross session", err)
+	}
+	shared, err := s.PreviewAccess(stranger.TokenHash, p.ID, "")
+	if err != nil || shared.State.Revision != 2 {
+		t.Fatal("shared data unavailable", shared, err)
 	}
 	in.Expected = 2
 	in.RequestID = "import-request"
@@ -156,7 +160,7 @@ func TestIncompatibleCodePreservesDataAndResetRequiresBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	_, session, _ := s.NewGuest()
+	_, session := testAccount(t, s)
 	p := appFixture(t, s, session)
 	a, err := s.PreviewAccess(session.TokenHash, p.ID, "")
 	if err != nil {

@@ -14,7 +14,7 @@ func (s *Store) CreateShare(sessionHash, id, version string) (string, string, er
 		return "", "", err
 	}
 	defer tx.Rollback()
-	p, err := authProject(tx, sessionHash, id)
+	p, err := sharedProject(tx, sessionHash, id)
 	if err != nil {
 		return "", "", err
 	}
@@ -101,7 +101,7 @@ func (s *Store) Shares(sessionHash, id string) ([]map[string]string, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err = authProject(tx, sessionHash, id); err != nil {
+	if _, err = sharedProject(tx, sessionHash, id); err != nil {
 		return nil, err
 	}
 	rows, err := tx.Query(`SELECT id,version_id,created FROM share_links WHERE project_id=? AND revoked_at='' ORDER BY created DESC`, id)
@@ -126,7 +126,7 @@ func (s *Store) RevokeShare(sessionHash, id, shareID string) error {
 		return err
 	}
 	defer tx.Rollback()
-	if _, err = authProject(tx, sessionHash, id); err != nil {
+	if _, err = sharedProject(tx, sessionHash, id); err != nil {
 		return err
 	}
 	if _, err = tx.Exec(`UPDATE share_links SET revoked_at=? WHERE id=? AND project_id=?`, core.Now(), shareID, id); err != nil {
@@ -146,25 +146,16 @@ func (s *Store) CopyShare(sessionHash, token, requestID string) (*core.Project, 
 		return nil, err
 	}
 	defer tx.Rollback()
-	session, err := readSession(tx, sessionHash)
-	if err != nil {
-		return nil, ErrSession
-	}
-	original, version, title, err := readShare(tx, token)
+	session, err := readAccount(tx, sessionHash)
 	if err != nil {
 		return nil, err
 	}
-	var data []byte
-	var source string
-	err = tx.QueryRow(`SELECT p.state,c.source FROM project_copies c JOIN projects p ON p.id=c.project_id WHERE c.session_hash=? AND c.request_id=?`, sessionHash, requestID).Scan(&data, &source)
 	key := "share:" + core.Hash([]byte(token))
-	if err == nil {
-		if source != key {
-			return nil, errors.New("请求标识已用于其他副本")
-		}
-		return decode(data)
+	if p, found, err := priorCopy(tx, sessionHash, requestID, key); err != nil || found {
+		return p, err
 	}
-	if !errors.Is(err, sql.ErrNoRows) {
+	original, version, title, err := readShare(tx, token)
+	if err != nil {
 		return nil, err
 	}
 	files, reports, err := original.PreviewFiles(version)

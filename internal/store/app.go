@@ -20,15 +20,15 @@ type PreviewAccess struct {
 	Version  string            `json:"version"`
 }
 
-// authProject is also called inside the write transaction: a logout, claim or
-// code promotion that raced the HTTP middleware cannot retain write authority.
-func authProject(tx *sql.Tx, hash, id string) (*core.Project, error) {
-	session, err := readSession(tx, hash)
+// Recheck the account inside transactions so a revoked session cannot keep
+// using a previously issued preview grant. Every signed-in account shares projects.
+func sharedProject(tx *sql.Tx, hash, id string) (*core.Project, error) {
+	_, err := readAccount(tx, hash)
 	if err != nil {
-		return nil, ErrSession
+		return nil, err
 	}
 	var data []byte
-	err = tx.QueryRow(`SELECT state FROM projects WHERE id=? AND (owner=? OR (?<>'' AND owner IN(SELECT workspace_id FROM workspace_accounts WHERE user_id=?)))`, id, session.Workspace, session.UserID, session.UserID).Scan(&data)
+	err = tx.QueryRow(`SELECT state FROM projects WHERE id=?`, id).Scan(&data)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, core.ErrNotFound
 	}
@@ -65,7 +65,7 @@ func (s *Store) PreviewAccess(sessionHash, id, version string) (PreviewAccess, e
 		return PreviewAccess{}, err
 	}
 	defer tx.Rollback()
-	p, err := authProject(tx, sessionHash, id)
+	p, err := sharedProject(tx, sessionHash, id)
 	if err != nil {
 		return PreviewAccess{}, err
 	}
@@ -125,7 +125,7 @@ func (s *Store) PreviewAccess(sessionHash, id, version string) (PreviewAccess, e
 }
 
 func validateGrant(tx *sql.Tx, sessionHash, id, grant string) (*core.Project, int, error) {
-	p, err := authProject(tx, sessionHash, id)
+	p, err := sharedProject(tx, sessionHash, id)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -261,7 +261,7 @@ func (s *Store) AppBackups(sessionHash, id string) ([]map[string]any, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
-	if _, err = authProject(tx, sessionHash, id); err != nil {
+	if _, err = sharedProject(tx, sessionHash, id); err != nil {
 		return nil, err
 	}
 	rows, err := tx.Query(`SELECT id,schema_version,revision,value,created FROM app_backups WHERE project_id=? ORDER BY created DESC`, id)

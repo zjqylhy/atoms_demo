@@ -91,7 +91,7 @@ func TestActionFormatRetries(t *testing.T) {
 			})
 			e, p := testEngine(t, g)
 			e.Config.MaxCalls = 48
-			started, err := e.Start("alice", p.ID, "测试格式重试", "build", "start", "submit", "")
+			started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "测试格式重试", "build", "start", "submit", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -132,7 +132,7 @@ func TestGatewayTPMRetries(t *testing.T) {
 			e, p := testEngine(t, g)
 			e.Config.MaxCalls = tt.runCap
 			e.Config.DailyCalls = tt.daily
-			started, err := e.Start("alice", p.ID, "测试网关限流恢复", "build", "start", "submit", "")
+			started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "测试网关限流恢复", "build", "start", "submit", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -164,7 +164,7 @@ func TestStopCancelsGatewayTPMWait(t *testing.T) {
 		return core.ModelMessage{}, core.Usage{}, &model.TPMThrottleError{RetryAfter: time.Minute}
 	})
 	e, p := testEngine(t, g)
-	started, err := e.Start("alice", p.ID, "测试取消等待", "build", "start", "submit", "")
+	started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "测试取消等待", "build", "start", "submit", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +205,7 @@ func TestAnswerIsBoundToTheDisplayedQuestion(t *testing.T) {
 	})
 	e, p := testEngine(t, g)
 	start := func(action, request, text, decisionID string) (*core.Project, error) {
-		return e.Start("alice", p.ID, text, "build", request, action, decisionID)
+		return e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, text, "build", request, action, decisionID)
 	}
 	waiting := func(p *core.Project) bool {
 		return p.Tasks[p.CurrentTask].Status == "waiting_input" && p.ActiveRun == ""
@@ -275,21 +275,21 @@ func TestPlanApprovalAndRealToolWrites(t *testing.T) {
 		}
 	})
 	e, p := testEngine(t, g)
-	if _, err := e.Start("alice", p.ID, "写说明", "plan", "start", "submit", ""); err != nil {
+	if _, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "写说明", "plan", "start", "submit", ""); err != nil {
 		t.Fatal(err)
 	}
 	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.Tasks[p.CurrentTask].Status == "waiting_plan" })
 	if len(p.Files) != 0 {
 		t.Fatal("modified files before approval")
 	}
-	if _, err := e.Start("alice", p.ID, "", "plan", "bad", "approve", "outdated"); err == nil {
+	if _, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "plan", "bad", "approve", "outdated"); err == nil {
 		t.Fatal("old approval accepted")
 	}
 	revision := p.Tasks[p.CurrentTask].Plan.Revision
-	if _, err := e.Start("alice", p.ID, "", "plan", "approve", "approve", revision); err != nil {
+	if _, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "plan", "approve", "approve", revision); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Start("alice", p.ID, "", "plan", "approve", "approve", revision); err != nil {
+	if _, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "plan", "approve", "approve", revision); err != nil {
 		t.Fatal("duplicate request should return existing state", err)
 	}
 	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.Tasks[p.CurrentTask].Status == "completed" })
@@ -340,7 +340,7 @@ func TestStopThenContinueKeepsCommittedFiles(t *testing.T) {
 		}
 	})
 	e, p := testEngine(t, g)
-	if _, err := e.Start("alice", p.ID, "三份文件", "build", "start", "submit", ""); err != nil {
+	if _, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "三份文件", "build", "start", "submit", ""); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -356,7 +356,7 @@ func TestStopThenContinueKeepsCommittedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.Tasks[p.CurrentTask].Status == "stopped" })
-	if _, err := e.Start("alice", p.ID, "", "build", "resume", "continue", ""); err != nil {
+	if _, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "", "build", "resume", "continue", ""); err != nil {
 		t.Fatal(err)
 	}
 	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.Tasks[p.CurrentTask].Status == "completed" })

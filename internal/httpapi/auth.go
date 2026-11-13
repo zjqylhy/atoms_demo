@@ -40,11 +40,14 @@ func (s *Server) setCookie(w http.ResponseWriter, r *http.Request, token string,
 }
 
 func (s *Server) resolveSession(w http.ResponseWriter, r *http.Request) (string, store.Session, error) {
-	bootstrap := r.URL.Path == "/api/bootstrap"
+	bootstrap := authBootstrap(r)
 	if cookie, err := r.Cookie(s.cookieName(r, true)); err == nil {
 		session, err := s.Store.Session(cookie.Value, false)
 		if err == nil && session.UserID != "" {
 			return cookie.Value, session, nil
+		}
+		if err != nil && !errors.Is(err, store.ErrSession) {
+			return "", store.Session{}, err
 		}
 		if !bootstrap {
 			return "", store.Session{}, store.ErrSession
@@ -55,6 +58,9 @@ func (s *Server) resolveSession(w http.ResponseWriter, r *http.Request) (string,
 		session, err := s.Store.Session(cookie.Value, true)
 		if err == nil && session.UserID == "" {
 			return cookie.Value, session, nil
+		}
+		if err != nil && !errors.Is(err, store.ErrSession) {
+			return "", store.Session{}, err
 		}
 	}
 	if !bootstrap {
@@ -67,14 +73,35 @@ func (s *Server) resolveSession(w http.ResponseWriter, r *http.Request) (string,
 	return token, session, err
 }
 
+func readMethod(r *http.Request) bool { return r.Method == "GET" || r.Method == "HEAD" }
+
+func authBootstrap(r *http.Request) bool {
+	return readMethod(r) && (r.URL.Path == "/api/bootstrap" || r.URL.Path == "/api/auth/me")
+}
+
+func publicResource(r *http.Request) bool {
+	if !readMethod(r) {
+		return false
+	}
+	if r.URL.Path == "/api/catalog" {
+		return true
+	}
+	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/"), "/")
+	return len(parts) >= 3 && parts[0] == "api" && parts[1] == "shares" && len(parts[2]) == 64 &&
+		(len(parts) == 3 || len(parts) == 4 && parts[3] == "preview")
+}
+
+func loginPreparation(r *http.Request) bool {
+	return authBootstrap(r) || r.Method == "POST" && (r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/register")
+}
+
 func (s *Server) sessionMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "same-origin")
 		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-		publicCatalog := r.Method == "GET" && (r.URL.Path == "/api/catalog" || strings.HasPrefix(r.URL.Path, "/api/catalog/"))
-		publicShare := r.Method == "GET" && strings.HasPrefix(r.URL.Path, "/api/shares/")
-		if publicShare || publicCatalog {
+		public := publicResource(r)
+		if public {
 			key := "public:" + s.clientIP(r)
 			now := time.Now()
 			s.mu.Lock()
@@ -95,13 +122,23 @@ func (s *Server) sessionMiddleware(next http.Handler) http.Handler {
 				return
 			}
 		}
-		if !strings.HasPrefix(r.URL.Path, "/api/") || publicCatalog || publicShare {
+		if !strings.HasPrefix(r.URL.Path, "/api/") || public {
 			next.ServeHTTP(w, r)
 			return
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 3*1024*1024)
 		token, session, err := s.resolveSession(w, r)
 		if err != nil {
+			if errors.Is(err, store.ErrSession) {
+				s.fail(w, 401, store.ErrSession)
+			} else {
+				s.fail(w, 503, errors.New("账号服务暂不可用，请稍后重试"))
+			}
+			return
+		}
+		// Form sessions only prepare login. Business routes fail closed before
+		// loading projects, dispatching a run or installing a fallback example.
+		if !loginPreparation(r) && session.UserID == "" {
 			s.fail(w, 401, store.ErrSession)
 			return
 		}
@@ -145,9 +182,9 @@ func (s *Server) sessionMiddleware(next http.Handler) http.Handler {
 		workspace := session.Workspace
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 		if len(parts) >= 3 && parts[0] == "api" && parts[1] == "projects" {
-			workspace, err = s.Store.ProjectOwner(session, parts[2])
+			workspace, err = s.Store.ProjectWorkspace(session.TokenHash, parts[2])
 			if err != nil {
-				s.fail(w, 404, err)
+				s.projectFailure(w, err)
 				return
 			}
 		}
@@ -185,9 +222,8 @@ func (s *Server) clientIP(r *http.Request) string {
 func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	var body struct {
-		Username    string `json:"username"`
-		Password    string `json:"password"`
-		ImportGuest bool   `json:"import_guest"`
+		Username string `json:"username"`
+		Password string `json:"password"`
 	}
 	if err := decode(r, &body); err != nil {
 		s.fail(w, 400, err)
@@ -223,24 +259,10 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !auth.Verify(r.Context(), hash, body.Password) || id == "" {
-			s.fail(w, 401, errors.New("用户名或密码错误"))
+			s.failCode(w, 401, "invalid_credentials", "用户名或密码错误")
 			return
 		}
-		var guest *store.Session
-		if body.ImportGuest {
-			cookie, cookieErr := r.Cookie(s.cookieName(r, false))
-			if cookieErr == nil {
-				g, loadErr := s.Store.Session(cookie.Value, true)
-				if loadErr == nil && g.UserID == "" {
-					guest = &g
-				}
-			}
-			if guest == nil {
-				s.fail(w, 409, errors.New("游客会话已变化，请刷新后重试"))
-				return
-			}
-		}
-		token, err = s.Store.Login(id, guest)
+		token, err = s.Store.Login(id)
 	}
 	if err != nil {
 		s.fail(w, 409, err)
@@ -250,7 +272,7 @@ func (s *Server) authenticate(w http.ResponseWriter, r *http.Request) {
 		_ = s.Store.RevokeSession(current.TokenHash)
 	}
 	s.setCookie(w, r, token, true)
-	if register || body.ImportGuest {
+	if register {
 		s.setCookie(w, r, "", false)
 	}
 	send(w, 200, map[string]any{"ok": true, "csrf": csrf(token)})

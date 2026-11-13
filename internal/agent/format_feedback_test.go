@@ -56,7 +56,7 @@ func TestMalformedEnvelopeRetryKeepsEvidenceAndExecutesOnlyCorrection(t *testing
 	e.Config.BaseURL, e.Config.APIKey, e.Config.Model = server.URL, "test-key", "test"
 	e.Config.ToolMode, e.Config.Protocol = "json", "chat_completions"
 	e.Model = model.New(e.Config)
-	started, err := e.Start("alice", p.ID, "inspect retained evidence", "build", "start", "submit", "")
+	started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "inspect retained evidence", "build", "start", "submit", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +146,7 @@ func TestNestedToolFeedbackReachesNextRequestAcrossProtocols(t *testing.T) {
 				e.Config.ToolMode, e.Config.Protocol = "json", "chat_completions"
 			}
 			e.Model = model.New(e.Config)
-			started, err := e.Start("alice", p.ID, "read evidence and prepare a plan", "build", "start", "submit", "")
+			started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "read evidence and prepare a plan", "build", "start", "submit", "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -223,7 +223,7 @@ func TestNativeMalformedArgumentsReceiveToolFeedback(t *testing.T) {
 			defer server.Close()
 			e.Config.BaseURL, e.Config.APIKey, e.Config.Model, e.Config.Protocol = server.URL, "test-key", "test", protocol
 			e.Model = model.New(e.Config)
-			started, err := e.Start("alice", p.ID, "inspect files", "build", "start", "submit", "")
+			started, err := e.Start(core.RunActor{Workspace: "alice"}, "alice", p.ID, "inspect files", "build", "start", "submit", "")
 			if err != nil {
 				t.Fatal(err)
 			}

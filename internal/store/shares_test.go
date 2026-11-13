@@ -14,8 +14,8 @@ func TestSharePinsVersionAndDoesNotCopyPrivateInputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	_, owner, _ := s.NewGuest()
-	_, guest, _ := s.NewGuest()
+	_, owner := testAccount(t, s)
+	_, guest := testAccount(t, s)
 	p, err := s.CopyPreset(owner.TokenHash, "board", "share-original")
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +47,7 @@ func TestSharePinsVersionAndDoesNotCopyPrivateInputs(t *testing.T) {
 	if len(copy.Messages) > 0 || len(copy.Runs) > 0 {
 		t.Fatal("private history copied")
 	}
-	if err = s.RevokeShare(guest.TokenHash, p.ID, sid); !errors.Is(err, core.ErrNotFound) {
+	if err = s.RevokeShare(guest.TokenHash, p.ID, sid); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.RevokeShare(owner.TokenHash, p.ID, sid); err != nil {

@@ -24,10 +24,13 @@ async function savedText(text){await (await app()).locator('#items').filter({has
   browser=await chromium.launch({headless:true,...(process.platform==='win32'?{executablePath:'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'}:{})});
   ctx=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true});page=await ctx.newPage();page.setDefaultTimeout(10000);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
-  await page.goto(base);await page.locator('.catalog-cards>button').first().waitFor();assert.equal(await page.locator('.catalog-cards>button').count(),3);
+  await page.goto(base);await page.getByRole('button',{name:'创建账号',exact:true}).click();
+  await page.getByLabel('用户名',{exact:true}).fill('acceptance_user');await page.getByLabel('密码',{exact:true}).fill('acceptance passphrase 2026');
+  await page.getByLabel('确认密码',{exact:true}).fill('acceptance passphrase 2026');
+  await page.getByRole('button',{name:'注册并进入',exact:true}).click();await page.locator('.catalog-cards>button').first().waitFor();assert.equal(await page.locator('.catalog-cards>button').count(),3);
   await page.screenshot({path:path.join(out,'desktop-home.png'),fullPage:true});
   await page.locator('.catalog-cards>button').first().click();await (await app()).locator('#title').fill('服务重启后保留');await (await app()).locator('#add').click();await savedText('服务重启后保留');
-  projectId=await page.evaluate(()=>localStorage.getItem('atoms:last'));boot=(await api(ctx,'/api/bootstrap')).data;
+  projectId=new URL(page.url()).searchParams.get('project');boot=(await api(ctx,'/api/bootstrap')).data;
   await (await app()).getByRole('button',{name:'更新 服务重启后保留',exact:true}).click();await (await app()).locator('.item').filter({hasText:'服务重启后保留'}).filter({hasText:'进行中'}).waitFor();
   await page.getByRole('button',{name:'刷新预览',exact:true}).click();await savedText('服务重启后保留');record('C01/C09 browser save and iframe reload','three public examples; own copy edits preserved');
   const before=(await api(ctx,`/api/projects/${projectId}/preview-access`,'POST',{version:''})).data;
@@ -44,32 +47,27 @@ async function savedText(text){await (await app()).locator('#items').filter({has
   const lost=page.evaluate(async({id,payload,csrf})=>{try{await fetch(`/api/projects/${id}/app-state`,{method:'PUT',headers:{'Content-Type':'application/json','X-CSRF-Token':csrf},body:JSON.stringify(payload)});return 'received';}catch{return 'response-lost';}},{id:projectId,payload,csrf:boot.csrf});
   await committedSignal;assert.equal(written.status,200);await stop();release();assert.equal(await lost,'response-lost');await page.unroute('**/app-state');
   await start(port);const repeat=await api(ctx,`/api/projects/${projectId}/app-state`,'PUT',payload);assert.equal(repeat.status,200);assert.equal(repeat.data.revision,written.data.revision);record('C10 committed write response loss and restart','proxy withheld committed response; process killed; replay returns original revision');
-  // Register from UI and log in from a new browser context.
-  await page.reload();await page.getByRole('button',{name:'登录 / 注册',exact:true}).click();
-  await page.getByRole('button',{name:'还没有账号？注册',exact:true}).click();
-  await page.getByLabel('用户名').fill('acceptance_user');await page.getByLabel('密码').fill('acceptance passphrase 2026');
-  await page.getByRole('button',{name:'注册',exact:true}).click();
-  await page.getByRole('button',{name:'退出',exact:true}).waitFor();
+  // Sign in from a new device after the account-backed restart checks.
   const second=await browser.newContext({viewport:{width:390,height:844}});const secondPage=await second.newPage();await secondPage.goto(base);
   const secondBoot=(await api(second,'/api/bootstrap')).data;
-  const login=await api(second,'/api/auth/login','POST',{username:'acceptance_user',password:'acceptance passphrase 2026',import_guest:false},secondBoot.csrf);assert.equal(login.status,200);
+  const login=await api(second,'/api/auth/login','POST',{username:'acceptance_user',password:'acceptance passphrase 2026'},secondBoot.csrf);assert.equal(login.status,200);
   const restored=await api(second,`/api/projects/${projectId}`);assert.equal(restored.status,200);
-  await secondPage.evaluate(id=>localStorage.setItem('atoms:last',id),projectId);await secondPage.reload();await secondPage.getByRole('button',{name:/产物工作区/}).click();
+  await secondPage.goto(base+'/?project='+projectId);await secondPage.getByRole('button',{name:/产物工作区/}).click();
   await secondPage.frameLocator('iframe[title="生成产物预览"]').locator('#items').filter({hasText:'响应丢失后仍保留'}).waitFor();
   const controls=await secondPage.locator('.work-actions').evaluate(element=>({html:element.innerHTML,box:element.getBoundingClientRect().toJSON(),children:[...element.children].map(child=>({text:child.textContent,box:child.getBoundingClientRect().toJSON()}))}));
   await fs.writeFile(path.join(out,'mobile-controls.json'),JSON.stringify(controls,null,2));
   for(const control of controls.children)assert.ok(control.box.x>=0 && control.box.right<=390 && control.box.bottom<=controls.box.bottom+1,'mobile control clipped: '+control.text);
   await secondPage.screenshot({path:path.join(out,'mobile-restored.png'),fullPage:true});
   assert.equal(await secondPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2),false);record('C05/C07/C13 cross-device account recovery','fresh 390px browser restored project and committed records without overflow');
-  const outsider=await browser.newContext();await api(outsider,'/api/bootstrap');assert.equal((await api(outsider,`/api/projects/${projectId}`)).status,404);
-  for(const suffix of ['preview','files?path=index.html','export','events'])assert.equal((await api(outsider,`/api/projects/${projectId}/${suffix}`)).status,404);
-  record('C07 private route isolation','other guest cannot read project, files, preview, export or events');
+  const outsider=await browser.newContext();await api(outsider,'/api/bootstrap');assert.equal((await api(outsider,`/api/projects/${projectId}`)).status,401);
+  for(const suffix of ['preview','files?path=index.html','export','events'])assert.equal((await api(outsider,`/api/projects/${projectId}/${suffix}`)).status,401);
+  record('C07 login-only route isolation','unsigned guest cannot read project, files, preview, export or events');
   boot=(await api(ctx,'/api/bootstrap')).data;
   const a=(await api(ctx,`/api/projects/${projectId}/preview-access`,'POST',{version:''})).data;
   const v=a.state.revision;const firstWrite=await api(ctx,`/api/projects/${projectId}/app-state`,'PUT',{grant:a.grant,expected_revision:v,schema_version:1,request_id:'cas-first-123',value:a.state.value});assert.equal(firstWrite.status,200);
   const conflict=await api(ctx,`/api/projects/${projectId}/app-state`,'PUT',{grant:a.grant,expected_revision:v,schema_version:1,request_id:'cas-second-123',value:{items:[]}});assert.equal(conflict.status,409);record('C11 concurrent stale save','second writer receives 409 and cannot erase records');
   // Exercise the user-facing JSON import, including its pre-import backup.
-  await page.evaluate(id=>localStorage.setItem('atoms:last',id),projectId);await page.reload();await savedText('响应丢失后仍保留');
+  await page.goto(base+'/?project='+projectId);await savedText('响应丢失后仍保留');
   const imported={schema_version:1,value:{items:[...a.state.value.items,{id:'imported',title:'导入私有记录',stage:0,done:false}]}};
   page.once('dialog',dialog=>dialog.accept());
   await page.locator('.data-import input').setInputFiles({name:'data.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(imported))});

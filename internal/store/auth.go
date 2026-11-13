@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-var ErrSession = errors.New("登录或游客会话已失效，请重新登录或刷新页面")
+var ErrSession = errors.New("请登录后继续使用")
 var ErrAuthLimit = errors.New("尝试过于频繁，请 15 分钟后重试")
 
 type Session struct {
@@ -138,7 +138,7 @@ func (s *Store) Register(guest Session, username, passwordHash string) (string, 
 	return token, tx.Commit()
 }
 
-func (s *Store) Login(userID string, guest *Session) (string, error) {
+func (s *Store) Login(userID string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tx, err := s.db.Begin()
@@ -149,11 +149,6 @@ func (s *Store) Login(userID string, guest *Session) (string, error) {
 	var workspace string
 	if err = tx.QueryRow(`SELECT workspace_id FROM users WHERE id=?`, userID).Scan(&workspace); err != nil {
 		return "", ErrSession
-	}
-	if guest != nil {
-		if err = claimWorkspace(tx, *guest, userID); err != nil {
-			return "", err
-		}
 	}
 	token, err := issueAccount(tx, userID, workspace)
 	if err != nil {
@@ -167,11 +162,29 @@ func (s *Store) RevokeSession(hash string) error {
 	return err
 }
 
-func (s *Store) SessionValid(hash string) bool { _, err := readSession(s.db, hash); return err == nil }
+// Login preparation sessions can protect forms, but never grant project access.
+func readAccount(q rowReader, hash string) (Session, error) {
+	session, err := readSession(q, hash)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && session.UserID == "" {
+		return Session{}, ErrSession
+	}
+	return session, err
+}
 
-func (s *Store) ProjectOwner(session Session, id string) (string, error) {
+func (s *Store) AccountSession(hash string) (Session, error) { return readAccount(s.db, hash) }
+
+func (s *Store) AccountSessionValid(hash string) bool {
+	_, err := s.AccountSession(hash)
+	return err == nil
+}
+
+// A project's workspace locates its bytes and quotas, not its access permissions.
+func (s *Store) ProjectWorkspace(sessionHash, id string) (string, error) {
+	if _, err := s.AccountSession(sessionHash); err != nil {
+		return "", err
+	}
 	var workspace string
-	err := s.db.QueryRow(`SELECT owner FROM projects WHERE id=? AND (owner=? OR (?<>'' AND owner IN(SELECT workspace_id FROM workspace_accounts WHERE user_id=?)))`, id, session.Workspace, session.UserID, session.UserID).Scan(&workspace)
+	err := s.db.QueryRow(`SELECT owner FROM projects WHERE id=?`, id).Scan(&workspace)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = core.ErrNotFound
 	}

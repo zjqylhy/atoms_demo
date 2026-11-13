@@ -26,7 +26,7 @@ func (s *Store) ResetAppState(sessionHash, id string, in ResetAppRequest) (int64
 		return 0, err
 	}
 	defer tx.Rollback()
-	p, err := authProject(tx, sessionHash, id)
+	p, err := sharedProject(tx, sessionHash, id)
 	if err != nil {
 		return 0, err
 	}

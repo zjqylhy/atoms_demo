@@ -1,0 +1,293 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "删除共享项目 · 待确认方案",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "output": ".archify/workflow-login-required-project-deletion-20261113-212826/deletion/delete-project.html",
+    "repository": {
+      "url": "https://github.com/zjqylhy/atoms_demo.git",
+      "revision": "93face139d8812749a58c318467b377aa8ce03e1",
+      "provider": "github",
+      "link_mode": "local-only"
+    }
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "删除主流程"
+    },
+    {
+      "id": "exceptions",
+      "label": "取消与拒绝",
+      "variant": "exception"
+    }
+  ],
+  "mainPath": [
+    "choose",
+    "confirm",
+    "auth",
+    "running",
+    "remove",
+    "finished"
+  ],
+  "nodes": [
+    {
+      "id": "choose",
+      "lane": "main",
+      "col": 0,
+      "type": "frontend",
+      "label": "选择历史项目",
+      "sublabel": "新增：项目删除入口",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 157,
+          "end_line": 162,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "confirm",
+      "lane": "main",
+      "col": 1,
+      "type": "frontend",
+      "label": "确认删除",
+      "sublabel": "名称 · 范围 · 影响所有人",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 157,
+          "end_line": 162,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "auth",
+      "lane": "main",
+      "col": 2,
+      "type": "security",
+      "label": "登录校验",
+      "sublabel": "任何有效账号均可删除",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 121,
+          "end_line": 131,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "running",
+      "lane": "main",
+      "col": 3,
+      "type": "security",
+      "label": "检查活动运行",
+      "sublabel": "运行或收尾中均拒绝",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 125,
+          "end_line": 131,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "remove",
+      "lane": "main",
+      "col": 4,
+      "type": "database",
+      "label": "事务内删除",
+      "sublabel": "清理关联 核对文件引用",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 133,
+          "end_line": 148,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "finished",
+      "lane": "main",
+      "col": 5,
+      "type": "frontend",
+      "label": "同步共享列表",
+      "sublabel": "删除当前项则回到新建",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 157,
+          "end_line": 162,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "cancelled",
+      "lane": "exceptions",
+      "col": 1,
+      "type": "frontend",
+      "label": "取消删除",
+      "sublabel": "项目保持原状",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 157,
+          "end_line": 160,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "signin",
+      "lane": "exceptions",
+      "col": 2,
+      "type": "frontend",
+      "label": "进入登录页",
+      "sublabel": "失效请求不执行删除",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 59,
+          "end_line": 67,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "busy",
+      "lane": "exceptions",
+      "col": 3,
+      "type": "backend",
+      "label": "暂不可删除",
+      "sublabel": "先停止任务或等待收尾",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 125,
+          "end_line": 131,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    },
+    {
+      "id": "rollback",
+      "lane": "exceptions",
+      "col": 4,
+      "type": "database",
+      "label": "回滚并提示",
+      "sublabel": "原项目和数据保持完整",
+      "width": 160,
+      "sources": [
+        {
+          "path": "docs/login-required-project-deletion-design.md",
+          "line": 146,
+          "end_line": 148,
+          "label": "拟实施方案，尚未编码"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "choose",
+      "to": "confirm"
+    },
+    {
+      "from": "confirm",
+      "to": "auth",
+      "label": "确认",
+      "variant": "emphasis"
+    },
+    {
+      "from": "confirm",
+      "to": "cancelled",
+      "label": "取消",
+      "role": "branch",
+      "variant": "dashed"
+    },
+    {
+      "from": "auth",
+      "to": "running",
+      "label": "有效",
+      "variant": "emphasis"
+    },
+    {
+      "from": "auth",
+      "to": "signin",
+      "label": "失效",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "from": "running",
+      "to": "remove",
+      "label": "无活动",
+      "variant": "emphasis"
+    },
+    {
+      "from": "running",
+      "to": "busy",
+      "label": "运行中",
+      "role": "error",
+      "variant": "security"
+    },
+    {
+      "from": "remove",
+      "to": "finished",
+      "label": "提交成功",
+      "variant": "emphasis"
+    },
+    {
+      "from": "remove",
+      "to": "rollback",
+      "label": "失败",
+      "role": "error",
+      "variant": "security"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "对所有登录账号生效",
+      "items": [
+        "任一登录账号可确认删除完整项目；未登录不能删除。",
+        "删除对话、任务、文件、版本和业务数据，原分享及预览授权失效。",
+        "产品不提供恢复入口；已导出文件和历史部署备份不属于在线删除。"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "数据一起提交",
+      "items": [
+        "关联清理与主项目删除在同一数据库事务中，失败全部撤销。",
+        "其他项目仍引用的文件字节保留；账号与已消耗额度保留。"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "避免删后重建",
+      "items": [
+        "启动和删除共用运行锁；删除后的迟到写入失败。",
+        "保留最小复制回执，旧请求不能重建已删副本。",
+        "原任务关联的演示副本被删时标记不可用。此图是方案，尚未实现。"
+      ]
+    }
+  ]
+}

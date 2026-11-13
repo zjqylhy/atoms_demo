@@ -1,0 +1,51 @@
+{
+  "date": "2026-11-13",
+  "status": "passed",
+  "scope": "Only the proposed workflow diagrams; no product implementation tests have run.",
+  "diagrams": [
+    {
+      "name": "login",
+      "type": "workflow",
+      "source_revision": "93face139d8812749a58c318467b377aa8ce03e1",
+      "specification": {
+        "path": ".archify/workflow-login-required-project-deletion-20261113-212826/login/candidate.json",
+        "sha256": "7098b98ef57c69c9bc0497536f817335b4fce91a40ae872046fbca07877c6d83"
+      },
+      "artifact": {
+        "path": ".archify/workflow-login-required-project-deletion-20261113-212826/login/shared-login.html",
+        "sha256": "478872f0dd78565373f7938bbe4ebd57849e405ad124eadcea34d91dd056a625"
+      },
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "summary_receipt": ".archify/workflow-login-required-project-deletion-20261113-212826/login/review-2/shared-login.finalize-summary.json",
+      "browser_receipt": ".archify/workflow-login-required-project-deletion-20261113-212826/login/review-2/shared-login.browser-check.json",
+      "visual_review": "not-requested"
+    },
+    {
+      "name": "deletion",
+      "type": "workflow",
+      "source_revision": "93face139d8812749a58c318467b377aa8ce03e1",
+      "specification": {
+        "path": ".archify/workflow-login-required-project-deletion-20261113-212826/deletion/candidate.json",
+        "sha256": "7ffc00014a9d851625db80e4ea93d4e11248480f0f30db760af19f6f554d53b9"
+      },
+      "artifact": {
+        "path": ".archify/workflow-login-required-project-deletion-20261113-212826/deletion/delete-project.html",
+        "sha256": "3d028693d1f50f15eb52a24622ac6b5248e5469cac3fb9c26501f872e8be8ea6"
+      },
+      "gates": {
+        "validate": "pass",
+        "deliver": "pass",
+        "check": "pass",
+        "browser-check": "pass"
+      },
+      "summary_receipt": ".archify/workflow-login-required-project-deletion-20261113-212826/deletion/review-2/delete-project.finalize-summary.json",
+      "browser_receipt": ".archify/workflow-login-required-project-deletion-20261113-212826/deletion/review-2/delete-project.browser-check.json",
+      "visual_review": "not-requested"
+    }
+  ]
+}

@@ -53,12 +53,12 @@ func TestAccountClaimPreservesProjectsQuotaAndRevokesLegacyCookie(t *testing.T) 
 	if err = s.ReserveCall(other.Workspace, 20, 2); err != nil {
 		t.Fatal(err)
 	}
-	secondToken, err := s.Login(account.UserID, &other)
+	secondToken, err := s.Login(account.UserID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Login(account.UserID, &other); err == nil {
-		t.Fatal("guest claimed twice")
+	if err = s.ReserveCall(workspace, 20, 2); err != nil {
+		t.Fatal(err)
 	}
 	if err = s.ReserveCall(workspace, 20, 2); err == nil {
 		t.Fatal("claim reset quota")
@@ -73,18 +73,22 @@ func TestAccountClaimPreservesProjectsQuotaAndRevokesLegacyCookie(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, err := s.List(account.Workspace)
+	list, err := s.SharedProjects(account.TokenHash)
 	if err != nil || len(list) != 2 {
 		t.Fatalf("projects lost: %v %v", list, err)
 	}
 	for _, id := range []string{p.ID, q.ID} {
-		if _, err = s.ProjectOwner(account, id); err != nil {
+		if _, err = s.ProjectWorkspace(account.TokenHash, id); err != nil {
 			t.Fatal(err)
 		}
 	}
 	_, stranger, _ := s.NewGuest()
-	if _, err = s.ProjectOwner(stranger, p.ID); err == nil {
-		t.Fatal("cross-account access")
+	if _, err = s.ProjectWorkspace(stranger.TokenHash, p.ID); !errors.Is(err, ErrSession) {
+		t.Fatal("guest access", err)
+	}
+	_, another := testAccount(t, s)
+	if got, err := s.ProjectWorkspace(another.TokenHash, p.ID); err != nil || got != workspace {
+		t.Fatal("shared project uses wrong workspace", got, err)
 	}
 	if err = s.RevokeSession(account.TokenHash); err != nil {
 		t.Fatal(err)

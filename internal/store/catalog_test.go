@@ -12,8 +12,8 @@ func TestPresetCopiesAreAtomicIsolatedAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	_, a, _ := s.NewGuest()
-	_, b, _ := s.NewGuest()
+	_, a := testAccount(t, s)
+	_, b := testAccount(t, s)
 	p, err := s.CopyPreset(a.TokenHash, "board", "copy-request-1")
 	if err != nil {
 		t.Fatal(err)
