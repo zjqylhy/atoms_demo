@@ -1,13 +1,39 @@
 package model
 
 import (
+	"encoding/json"
 	"errors"
 	"mockatoms/internal/config"
 	"mockatoms/internal/core"
 	"mockatoms/internal/validation"
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestCorrectedCalculatorJSONStillHonorsSingleCallLimit(t *testing.T) {
+	raw, err := os.ReadFile("../validation/testdata/calculator_format_errors.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []struct{ Name, Corrected string }
+	if err := json.Unmarshal(raw, &fixtures); err != nil || len(fixtures) != 6 {
+		t.Fatal("missing original failures", err)
+	}
+	tools := []Tool{{Name: "write_file"}, {Name: "propose_plan"}}
+	for _, fixture := range fixtures {
+		t.Run(fixture.Name, func(t *testing.T) {
+			message, err := parseJSONAction(fixture.Corrected, tools)
+			if strings.HasPrefix(fixture.Name, "file_") {
+				if err == nil || len(message.ToolCalls) != 0 || !strings.Contains(err.Error(), "array（3 项）") || !strings.Contains(err.Error(), "所有调用均未执行") {
+					t.Fatal("syntax correction admitted a multi-call reply", message, err)
+				}
+			} else if err != nil || len(message.ToolCalls) != 1 {
+				t.Fatal("valid corrected plan rejected", message, err)
+			}
+		})
+	}
+}
 
 func TestJSONToolAdaptation(t *testing.T) {
 	tools := []Tool{{Name: "read_file", Parameters: map[string]any{"type": "object"}}}
@@ -62,6 +88,9 @@ func TestJSONEnvelopeReportsAllShapeFailures(t *testing.T) {
 			}
 			if !found {
 				t.Fatal("missing precise repair issue", err)
+			}
+			if test.code == "max_items" && (!strings.Contains(err.Error(), "所有调用均未执行") || !strings.Contains(err.Error(), "下一步的一个调用")) {
+				t.Fatal("multiple calls lost rejection and repair guidance", err)
 			}
 		})
 	}
