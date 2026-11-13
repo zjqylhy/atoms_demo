@@ -55,6 +55,9 @@ func TestProjectOrderSharedDurableAndContentIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err = s.Recover(); err != nil {
+		t.Fatal(err)
+	}
 	shared, err = s.ProjectOrder(a.TokenHash)
 	if err != nil || shared.Revision != saved.Revision || !slices.Equal(orderIDs(shared), want) {
 		t.Fatalf("restart %v %v", shared, err)
@@ -83,6 +86,48 @@ func TestProjectOrderSharedDurableAndContentIndependent(t *testing.T) {
 	}
 	if _, err = s.SaveProjectOrder(a.TokenHash, saved.Revision, want); !errors.Is(err, ErrOrderConflict) {
 		t.Fatal("deleted project", err)
+	}
+}
+
+func TestRecoverPreservesIdleProjectsAndInitialOrder(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, account := testAccount(t, s)
+	one, err := s.Create(account.Workspace, "one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	two, err := s.Create(account.Workspace, "two")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.Mutate(account.Workspace, one.ID, nil, func(p *core.Project) error { p.Title = "recently edited"; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	before, err := s.ProjectOrder(account.TokenHash)
+	if err != nil || !slices.Equal(orderIDs(before), []string{one.ID, two.ID}) {
+		t.Fatal(before, err)
+	}
+	var beforeState []byte
+	if err = s.db.QueryRow("SELECT state FROM projects WHERE id=?", one.ID).Scan(&beforeState); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.ProjectOrder(account.TokenHash)
+	if err != nil || core.JSON(after) != core.JSON(before) {
+		t.Fatalf("idle recovery changed order or timestamps: %v %v %v", before, after, err)
+	}
+	var afterState []byte
+	if err = s.db.QueryRow("SELECT state FROM projects WHERE id=?", one.ID).Scan(&afterState); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(beforeState, afterState) {
+		t.Fatal("idle recovery rewrote project state")
 	}
 }
 

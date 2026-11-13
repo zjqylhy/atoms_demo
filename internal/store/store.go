@@ -221,7 +221,9 @@ func (s *Store) Files(owner string, m core.Manifest) (map[string]string, error) 
 	return out, nil
 }
 func (s *Store) Recover() error {
-	rows, e := s.db.Query("SELECT owner,id FROM projects")
+	// Idle projects need no recovery write. Keeping their timestamps also
+	// preserves the initial shared list order before its first manual save.
+	rows, e := s.db.Query(`SELECT owner,id FROM projects WHERE COALESCE(json_extract(state,'$.active_run'),'')<>''`)
 	if e != nil {
 		return e
 	}
