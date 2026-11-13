@@ -1,8 +1,10 @@
 package model
 
 import (
+	"errors"
 	"mockatoms/internal/config"
 	"mockatoms/internal/core"
+	"mockatoms/internal/validation"
 	"strings"
 	"testing"
 )
@@ -31,6 +33,47 @@ func TestJSONToolAdaptation(t *testing.T) {
 		if _, err := parseJSONAction(bad, tools); err == nil {
 			t.Fatal("invalid action accepted", bad)
 		}
+	}
+}
+
+func TestJSONEnvelopeReportsAllShapeFailures(t *testing.T) {
+	tools := []Tool{{Name: "inspect", Parameters: map[string]any{"type": "object"}}}
+	for _, test := range []struct{ input, path, code string }{
+		{`null`, "$", "type"},
+		{`{"content":42,"calls":[]}`, "$.content", "type"},
+		{`{"calls":{}}`, "$.calls", "type"},
+		{`{"calls":[{}]}`, "$.calls[0].name", "required"},
+		{`{"calls":[{"name":"inspect"}]}`, "$.calls[0].arguments", "required"},
+		{`{"calls":[{"name":3,"arguments":{}}]}`, "$.calls[0].name", "type"},
+		{`{"calls":[{"name":"unavailable","arguments":{}}]}`, "$.calls[0].name", "enum"},
+		{`{"calls":[{"name":"inspect","arguments":null}]}`, "$.calls[0].arguments", "type"},
+		{`{"calls":[{"name":"inspect","arguments":[]}]}`, "$.calls[0].arguments", "type"},
+		{`{"calls":[{},{}]}`, "$.calls", "max_items"},
+	} {
+		t.Run(test.input, func(t *testing.T) {
+			message, err := parseJSONAction(test.input, tools)
+			var detail *validation.Error
+			if len(message.ToolCalls) != 0 || !errors.As(err, &detail) {
+				t.Fatal("failure lost structured feedback or returned an action", message, err)
+			}
+			found := false
+			for _, issue := range detail.Issues {
+				found = found || issue.Path == test.path && issue.Code == test.code && issue.Actual != "" && issue.Expected != "" && issue.Hint != ""
+			}
+			if !found {
+				t.Fatal("missing precise repair issue", err)
+			}
+		})
+	}
+	_, err := parseJSONAction(`{"calls":[{}]}`, tools)
+	if !strings.Contains(err.Error(), "$.calls[0].name") || !strings.Contains(err.Error(), "$.calls[0].arguments") || !strings.Contains(err.Error(), "允许值：inspect") {
+		t.Fatal("missing name and arguments must be reported together", err)
+	}
+	// Arguments remain raw and are not business-validated by the protocol.
+	text := `{"calls":[{"name":"inspect","arguments":{"large":9007199254740993}}]}`
+	message, err := parseJSONAction(text, tools)
+	if err != nil || message.ToolCalls[0].Function.Arguments != `{"large":9007199254740993}` {
+		t.Fatal("protocol changed or interpreted business arguments", message, err)
 	}
 }
 
@@ -71,7 +114,7 @@ func TestJSONEnvelopeFeedbackLocatesMisplacedToolArguments(t *testing.T) {
 		if err == nil || len(message.ToolCalls) != 0 {
 			t.Fatal("invalid argument nesting was executed", message, err)
 		}
-		for _, want := range []string{"$.calls[0].role", "$.calls[0].arguments.role", "$.calls[0].arguments 缺失", "允许字段：name, arguments", `"name":"` + name + `"`, `"arguments":{}`} {
+		for _, want := range []string{"$.calls[0].role", "$.calls[0].arguments.role", "$.calls[0].arguments [required]", "允许字段：arguments, name", `"name":"` + name + `"`, `"arguments":{}`} {
 			if !strings.Contains(err.Error(), want) {
 				t.Fatalf("repair feedback omitted %q: %v", want, err)
 			}

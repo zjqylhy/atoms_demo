@@ -2,16 +2,16 @@ package model
 
 import (
 	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
 	"mockatoms/internal/core"
-	"strings"
 )
 
-type ActionFormatError struct{ Reason string }
+type ActionFormatError struct {
+	Reason string
+	Cause  error
+}
 
 func (e *ActionFormatError) Error() string { return e.Reason }
+func (e *ActionFormatError) Unwrap() error { return e.Cause }
 
 // JSON adaptation is an explicit deployment choice for gateways that expose
 // JSON output but not native function tools. The same role and schema guards apply.
@@ -71,48 +71,20 @@ func parseJSONAction(text string, tools []Tool) (core.ModelMessage, error) {
 			Arguments json.RawMessage `json:"arguments"`
 		} `json:"calls"`
 	}
-	d := json.NewDecoder(strings.NewReader(text))
-	d.DisallowUnknownFields()
-	var trailing any
 	m := core.ModelMessage{Role: "assistant"}
-	if err := d.Decode(&envelope); err != nil {
-		return m, fmt.Errorf("模型动作 JSON 格式无效，未执行：%v", err)
-	}
-	if d.Decode(&trailing) != io.EOF {
-		return m, errors.New("模型动作 JSON 包含多余内容，未执行：顶层对象闭合后只允许空白")
-	}
-	if envelope.Calls == nil {
-		var fields map[string]json.RawMessage
-		_ = json.Unmarshal([]byte(text), &fields)
-		// A prose-only response cannot execute a tool. Some JSON-only models omit
-		// the empty calls array when handing a specialist's result back to Mike.
-		if _, exists := fields["calls"]; !exists && envelope.Content != nil && strings.TrimSpace(*envelope.Content) != "" {
-			m.Content = *envelope.Content
-			return m, nil
-		}
-		return m, errors.New("模型动作 JSON 需要 calls 数组或非空 content 摘要，未执行")
-	}
-	if len(*envelope.Calls) > 1 {
-		return m, fmt.Errorf("模型一次返回 %d 个动作，本协议每次只允许一个，未执行", len(*envelope.Calls))
+	// Shape and permissions were checked above. RawMessage preserves argument
+	// bytes (including large numbers) for the tool's own validation and history.
+	if err := json.Unmarshal([]byte(text), &envelope); err != nil {
+		return m, err
 	}
 	// Explanatory prose is optional; only the validated action drives execution.
 	if envelope.Content != nil {
 		m.Content = *envelope.Content
 	}
+	if envelope.Calls == nil {
+		return m, nil
+	}
 	for _, call := range *envelope.Calls {
-		allowed := false
-		for _, tool := range tools {
-			if tool.Name == call.Name {
-				allowed = true
-				break
-			}
-		}
-		if !allowed {
-			return m, fmt.Errorf("当前角色没有工具 %s 的权限，未执行；请仅使用所列工具，专家完成时返回 calls:[] 和 content 摘要", call.Name)
-		}
-		if !strings.HasPrefix(strings.TrimSpace(string(call.Arguments)), "{") {
-			return m, errors.New("工具 arguments 必须是对象，未执行")
-		}
 		m.ToolCalls = append(m.ToolCalls, core.Call{ID: core.ID(), Type: "function", Function: core.Function{Name: call.Name, Arguments: string(call.Arguments)}})
 	}
 	return m, nil

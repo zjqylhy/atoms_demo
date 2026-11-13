@@ -7,6 +7,7 @@ import (
 	"mockatoms/internal/config"
 	"mockatoms/internal/core"
 	"mockatoms/internal/model"
+	"mockatoms/internal/validation"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -24,14 +25,16 @@ func TestWorkingMaterialsSurviveRetriesAndBothSummaries(t *testing.T) {
 			for i := 1; i <= 8; i++ {
 				contextStep(task, f, i, "renamed_tool", `{"ok":true,"result":"history"}`)
 			}
-			f.Messages = append(f.Messages, core.ModelMessage{Role: "assistant", Content: "BAD", InvalidAction: true}, core.ModelMessage{Role: "user", Content: formatFeedbackPrefix + "MISSING_FIELD"})
+			problem := validation.Validate(map[string]any{"items": []any{map[string]any{"value": true}}}, objectProp(map[string]any{"items": objectList(map[string]any{"value": prop("string", "填写真实结果")}, "value")}, "items"), "$.arguments")
+			feedback := formatFeedbackPrefix + core.JSON((&Engine{}).failureFeedback(problem))
+			f.Messages = append(f.Messages, core.ModelMessage{Role: "assistant", Content: "BAD", InvalidAction: true}, core.ModelMessage{Role: "user", Content: feedback})
 			cfg := config.Config{Model: "test", APIKey: "secret", Protocol: protocol, MaxRequestBytes: 100000}
 			if protocol == "json" {
 				cfg.Protocol, cfg.ToolMode = "chat_completions", "json"
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				wire, _ := io.ReadAll(r.Body)
-				for _, want := range []string{body, "SECOND_REQUIRED_INPUT", "H1", "H2", "MISSING_FIELD", "KEEP_CONFIRMED_ANSWER", "KEEP_LATEST_CORRECTION"} {
+				for _, want := range []string{body, "SECOND_REQUIRED_INPUT", "H1", "H2", "$.arguments.items[0].value", "实际 boolean", "要求 string", "validation", "KEEP_CONFIRMED_ANSWER", "KEEP_LATEST_CORRECTION"} {
 					if !strings.Contains(string(wire), want) {
 						t.Errorf("actual request omitted %s", excerpt(want, 60))
 					}
@@ -62,7 +65,7 @@ func TestWorkingMaterialsSurviveRetriesAndBothSummaries(t *testing.T) {
 					if _, _, err := client.GeneratePrepared(context.Background(), prepared.request, definitions(f.Role)); err != nil {
 						t.Fatal(err)
 					}
-					f.Messages = append(f.Messages, core.ModelMessage{Role: "assistant", Content: "BAD", InvalidAction: true}, core.ModelMessage{Role: "user", Content: formatFeedbackPrefix + "MISSING_FIELD"})
+					f.Messages = append(f.Messages, core.ModelMessage{Role: "assistant", Content: "BAD", InvalidAction: true}, core.ModelMessage{Role: "user", Content: feedback})
 				}
 			}
 			client.Config.MaxRequestBytes = 3000
@@ -94,7 +97,7 @@ func TestFileMaterialReplacementAndLegacyRecovery(t *testing.T) {
 func TestSchemaFeedbackIncludesAllowedAndRequiredFields(t *testing.T) {
 	for _, def := range definitions("Alex") {
 		if def.Name == "replace_text" {
-			err := validateArgs(map[string]any{"content": "partial", "expected_count": "wrong"}, def.Parameters)
+			err := validation.Validate(map[string]any{"content": "partial", "expected_count": "wrong"}, def.Parameters, "$.arguments")
 			for _, want := range []string{"未知参数 content", "缺少参数 old_text", "类型无效", "允许字段", "new_text", "必填字段"} {
 				if err == nil || !strings.Contains(err.Error(), want) {
 					t.Fatal("missing repair feedback", err)

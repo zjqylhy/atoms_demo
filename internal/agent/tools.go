@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"mockatoms/internal/core"
 	"mockatoms/internal/model"
+	"mockatoms/internal/validation"
 	"path"
 	"sort"
 	"strings"
@@ -89,10 +90,9 @@ func (b *boundTool) InvokableRun(ctx context.Context, raw string, _ ...tool.Opti
 			return b.e.record(b.s, b.call, nil, func(*core.Project) (any, error) { return nil, nil })
 		}
 	}
-	var args map[string]any
-	failure := json.Unmarshal([]byte(raw), &args)
+	value, failure := validation.Decode(raw, "$.arguments")
 	if failure == nil {
-		failure = validateArgs(args, b.def.Parameters)
+		failure = validation.Validate(value, b.def.Parameters, "$.arguments")
 	}
 	if failure != nil {
 		if p, _, _, err := b.e.load(b.s); err == nil {
@@ -106,6 +106,7 @@ func (b *boundTool) InvokableRun(ctx context.Context, raw string, _ ...tool.Opti
 		}
 		return b.e.record(b.s, b.call, nil, func(*core.Project) (any, error) { return nil, failure })
 	}
+	args := value.(map[string]any)
 	p, _, _, err := b.e.load(b.s)
 	if err != nil {
 		return "", err
@@ -118,79 +119,6 @@ func (b *boundTool) InvokableRun(ctx context.Context, raw string, _ ...tool.Opti
 	return b.e.execute(ctx, b.s, b.call, args)
 }
 
-// Feedback is derived from the same schema exposed to the model.
-func validateArgs(a map[string]any, schema map[string]any) error {
-	if a == nil {
-		return errors.New("参数必须是非 null 对象")
-	}
-	props := schema["properties"].(map[string]any)
-	allowed := make([]string, 0, len(props))
-	for key := range props {
-		allowed = append(allowed, key)
-	}
-	sort.Strings(allowed)
-	var problems []string
-	for key, value := range a {
-		spec, exists := props[key]
-		if !exists {
-			problems = append(problems, "未知参数 "+key)
-			continue
-		}
-		if err := validateValue(value, spec.(map[string]any)); err != nil {
-			problems = append(problems, key+"："+err.Error())
-		}
-	}
-	for _, key := range schema["required"].([]string) {
-		if _, exists := a[key]; !exists {
-			problems = append(problems, "缺少参数 "+key)
-		}
-	}
-	if len(problems) == 0 {
-		return nil
-	}
-	sort.Strings(problems)
-	return fmt.Errorf("%s；允许字段：%s；必填字段：%s", strings.Join(problems, "；"), strings.Join(allowed, ", "), strings.Join(schema["required"].([]string), ", "))
-}
-func validateValue(v any, spec map[string]any) error {
-	valid := false
-	switch spec["type"] {
-	case "string":
-		_, valid = v.(string)
-	case "boolean":
-		_, valid = v.(bool)
-	case "integer":
-		n, ok := v.(float64)
-		valid = ok && n == float64(int64(n))
-	case "array":
-		items, ok := v.([]any)
-		valid = ok
-		if ok {
-			for i, item := range items {
-				if err := validateValue(item, spec["items"].(map[string]any)); err != nil {
-					return fmt.Errorf("第 %d 项：%w", i+1, err)
-				}
-			}
-		}
-	case "object":
-		object, ok := v.(map[string]any)
-		valid = ok
-		if ok {
-			return validateArgs(object, spec)
-		}
-	}
-	if !valid {
-		return fmt.Errorf("类型无效，要求 %s", spec["type"])
-	}
-	if allowed, ok := spec["enum"].([]string); ok {
-		for _, item := range allowed {
-			if v == item {
-				return nil
-			}
-		}
-		return fmt.Errorf("允许值：%s", strings.Join(allowed, ", "))
-	}
-	return nil
-}
 func str(a map[string]any, k string) string { s, _ := a[k].(string); return s }
 func stringsArg(a map[string]any, k string) []string {
 	out := []string{}

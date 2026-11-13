@@ -616,7 +616,9 @@ func (e *Engine) record(s scope, c core.Call, blobs map[string][]byte, operation
 			if fact.Deterministic {
 				fact.Fingerprint = failureFingerprint(c.Function.Name, c.Function.Arguments, fact)
 			}
-			result = core.JSON(map[string]any{"ok": false, "error": e.Config.Redact(failure.Error()), "fact": fact})
+			feedback := e.failureFeedback(failure)
+			feedback["fact"] = fact
+			result = core.JSON(feedback)
 		} else {
 			result = core.JSON(map[string]any{"ok": true, "result": value})
 		}
