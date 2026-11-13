@@ -2,6 +2,8 @@
 
 日期：2026-11-11。
 
+2026-11-13 补充：用户已确认[验收缺口补齐需求](acceptance-completion-requirements.md)，纳入账号、跨设备恢复及生成应用业务数据持久化。该补充优先于本文对应的首版排除项；[新技术方案](acceptance-completion-design.md)待确认，不能据此视为功能已经实现。
+
 状态：**已获用户批准，进入实施与验收**。用户明确批准受限云端执行方案；后续取消 Git 提交，并指定现有 LLM 网关与 `atoms.linhengyi.xyz`。
 
 依据：[产品调研](product-research.md)、原始任务说明与共享 Plan 对话。下文保留需求基线；具体实现范围及验证结论见 [技术设计](technical-design.md) 与 [实施记录](implementation-status.md)。v0.5 纳入真实 Node 构建、脚本运行、浏览器交互测试及最多两轮运行修复，不以静态检查替代实际运行。首版运行代码使用固定依赖、禁外网、限时限资源的 gVisor 容器。
