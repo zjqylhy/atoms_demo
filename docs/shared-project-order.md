@@ -1,6 +1,6 @@
 # 左侧项目拖动排序
 
-日期：2026-11-14。用户已明确所有账号共用一套顺序，并确认“按此方案实现”。实现和本地验证完成，等待人工体验验收。结果见[验证记录](shared-project-order-validation.md)。
+日期：2026-11-14。用户已明确所有账号共用一套顺序，确认方案、认可结果并批准发布。实现已部署。结果见[验证记录](shared-project-order-validation.md)与[发布记录](shared-order-fallback-deployment-20261114.md)。
 
 ## 需求与验收
 
