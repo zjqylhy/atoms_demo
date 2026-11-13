@@ -529,6 +529,7 @@ export default function App() {
   const canSteer = running && task?.status === "running";
   const question = task?.status === "waiting_input" ? task.question : undefined;
   const selected = project?.versions?.find((v) => v.id === version);
+  const previewHead = !version || version === project?.head ? project?.head : "";
   const manifest = selected?.manifest || project?.files || {};
   const priorIndex = version
     ? (project?.versions || []).findIndex((v) => v.id === version) - 1
@@ -1364,7 +1365,7 @@ export default function App() {
                         className={"preview-wrap " + (mobile ? "mobile" : "")}
                       >
                         <AppPreview
-                          key={`${project.id}-${boot!.csrf}-${version}-${refresh}-${files.map(name => name + manifest[name]?.hash).join("|")}`}
+                          key={`${project.id}-${boot!.csrf}-${previewHead ?? ""}-${version}-${refresh}-${files.map(name => name + manifest[name]?.hash).join("|")}`}
                           projectId={project.id} version={version} csrf={boot!.csrf}
                         />
                       </div>
