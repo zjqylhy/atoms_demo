@@ -56,6 +56,9 @@ async function savedText(text){await (await app()).locator('#items').filter({has
   const restored=await api(second,`/api/projects/${projectId}`);assert.equal(restored.status,200);
   await secondPage.evaluate(id=>localStorage.setItem('atoms:last',id),projectId);await secondPage.reload();await secondPage.getByRole('button',{name:/产物工作区/}).click();
   await secondPage.frameLocator('iframe[title="生成产物预览"]').locator('#items').filter({hasText:'响应丢失后仍保留'}).waitFor();
+  const controls=await secondPage.locator('.work-actions').evaluate(element=>({html:element.innerHTML,box:element.getBoundingClientRect().toJSON(),children:[...element.children].map(child=>({text:child.textContent,box:child.getBoundingClientRect().toJSON()}))}));
+  await fs.writeFile(path.join(out,'mobile-controls.json'),JSON.stringify(controls,null,2));
+  for(const control of controls.children)assert.ok(control.box.x>=0 && control.box.right<=390 && control.box.bottom<=controls.box.bottom+1,'mobile control clipped: '+control.text);
   await secondPage.screenshot({path:path.join(out,'mobile-restored.png'),fullPage:true});
   assert.equal(await secondPage.evaluate(()=>document.documentElement.scrollWidth>innerWidth+2),false);record('C05/C07/C13 cross-device account recovery','fresh 390px browser restored project and committed records without overflow');
   const outsider=await browser.newContext();await api(outsider,'/api/bootstrap');assert.equal((await api(outsider,`/api/projects/${projectId}`)).status,404);
@@ -65,6 +68,12 @@ async function savedText(text){await (await app()).locator('#items').filter({has
   const a=(await api(ctx,`/api/projects/${projectId}/preview-access`,'POST',{version:''})).data;
   const v=a.state.revision;const firstWrite=await api(ctx,`/api/projects/${projectId}/app-state`,'PUT',{grant:a.grant,expected_revision:v,schema_version:1,request_id:'cas-first-123',value:a.state.value});assert.equal(firstWrite.status,200);
   const conflict=await api(ctx,`/api/projects/${projectId}/app-state`,'PUT',{grant:a.grant,expected_revision:v,schema_version:1,request_id:'cas-second-123',value:{items:[]}});assert.equal(conflict.status,409);record('C11 concurrent stale save','second writer receives 409 and cannot erase records');
+  // Exercise the user-facing JSON import, including its pre-import backup.
+  await page.evaluate(id=>localStorage.setItem('atoms:last',id),projectId);await page.reload();await savedText('响应丢失后仍保留');
+  const imported={schema_version:1,value:{items:[...a.state.value.items,{id:'imported',title:'导入私有记录',stage:0,done:false}]}};
+  page.once('dialog',dialog=>dialog.accept());
+  await page.locator('.data-import input').setInputFiles({name:'data.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(imported))});
+  await savedText('导入私有记录');const backups=await api(ctx,`/api/projects/${projectId}/app-backups`);assert.equal(backups.data.length,1);assert.deepEqual(backups.data[0].state.value,a.state.value);record('C15 JSON import with backup','confirmed import replaces current value; prior state remains downloadable');
   const share=(await api(ctx,`/api/projects/${projectId}/shares`,'POST',{version:''})).data;assert.ok(share.path);
   const publicPage=await outsider.newPage();await publicPage.goto(base+share.path);await publicPage.frameLocator('iframe').locator('#add').waitFor();
   assert.equal(await publicPage.frameLocator('iframe').getByText('响应丢失后仍保留').count(),0);
@@ -76,5 +85,10 @@ async function savedText(text){await (await app()).locator('#items').filter({has
   const submitted=await api(ctx,`/api/projects/${original.id}/actions`,'POST',{action:'submit',text:'制作任务管理工具',mode:'build',request_id:'no-key-fallback'});assert.ok(submitted.status<300);
   let failed;for(let i=0;i<100;i++){failed=(await api(ctx,`/api/projects/${original.id}`)).data;if(failed.recovery)break;await pause(100);}
   assert.ok(failed.recovery);assert.equal(failed.tasks[0].status,'failed');assert.equal(failed.runs[0].calls,0);const demo=(await api(ctx,`/api/projects/${failed.recovery.project_id}`)).data;assert.equal(demo.source.kind,'fallback');assert.ok(demo.preview_ready);record('C02 no-key fallback','distinct runnable demo, failed original preserved, zero model sends');
+  const preserved=(await api(ctx,`/api/projects/${projectId}`)).data;
+  assert.ok((await api(ctx,`/api/projects/${projectId}/actions`,'POST',{action:'submit',text:'增加标签筛选',mode:'build',request_id:'iterate-with-no-key'})).status<300);
+  let iteration;for(let i=0;i<100;i++){iteration=(await api(ctx,`/api/projects/${projectId}`)).data;if(iteration.recovery)break;await pause(100);}
+  assert.ok(iteration.recovery);assert.equal(iteration.head,preserved.head);assert.deepEqual(iteration.files,preserved.files);
+  const remaining=(await api(ctx,`/api/projects/${projectId}/preview-access`,'POST',{version:''})).data;assert.deepEqual(remaining.state.value,imported.value);record('C04 failed iteration preserves delivered code and data','fallback stays in separate project; original head/files/state unchanged');
   assert.deepEqual(errors,[]);await fs.writeFile(path.join(out,'results.json'),JSON.stringify({at:new Date().toISOString(),results,notes:['Browser widths are simulated, not a physical domestic cellular test.','C10 validates committed-write response-loss replay, not an OS-level crash at every SQLite instruction.']},null,2));console.log('ARTIFACTS '+out);
 })().catch(async error=>{console.error(error);if(page)await page.screenshot({path:path.join(out,'failure.png'),fullPage:true}).catch(()=>{});await fs.writeFile(path.join(out,'failure.txt'),String(error.stack));process.exitCode=1;}).finally(async()=>{if(browser)await browser.close();await stop();});

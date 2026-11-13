@@ -245,4 +245,4 @@ flowchart LR
 
 每项独立代码改动验证后分别提交 commit。清理本次替代的旧逻辑：只用旧 Cookie 的鉴权回退、重复恢复循环、强制所有业务状态进内存的提示，以及没有用途的兼容分支；只有确认新旧数据与调用场景已覆盖后才删除。
 
-本轮只交付需求、方案及流程图。关键拟定取舍是：用户名密码账号、复用 SQLite、每项目一份受限 JSON、正式数据与试用数据隔离、模板明确标识未完成原需求、离线 HTML 不承诺服务端同步。技术方案需按用户提供的 AGENTS.md 第 2 步确认后开始编码。
+本方案已获用户确认并完成实现与本地/隔离验证，见 [实施验收记录](acceptance-completion-validation.md)。实际路由为 preview-access、app-state、app-state/reset 和 /share/{token}；代码职责位于 internal/catalog、internal/appruntime、internal/store/app.go 等。TPM 保留两次等待，普通临时故障最多三次，二者使用同一恢复计数。按用户提供的 AGENTS.md 第 3 步，人工验收后完成交付。
