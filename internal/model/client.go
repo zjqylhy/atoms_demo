@@ -16,6 +16,7 @@ import (
 )
 
 type Tool struct {
+	Control     string         `json:"-"`
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	Parameters  map[string]any `json:"parameters"`
@@ -133,7 +134,7 @@ func (c *Client) GeneratePrepared(ctx context.Context, request PreparedRequest, 
 		raw := m.Content
 		m, err = parseJSONAction(raw, tools)
 		if err != nil {
-			return core.ModelMessage{Role: "assistant", Content: raw, InvalidAction: true}, usage, &ActionFormatError{Reason: err.Error()}
+			return core.ModelMessage{Role: "assistant", Content: raw, InvalidAction: true}, usage, &ActionFormatError{Reason: err.Error(), Cause: err}
 		}
 	}
 	if m.Role != "assistant" || (strings.TrimSpace(m.Content) == "" && len(m.ToolCalls) == 0) {
@@ -144,9 +145,11 @@ func (c *Client) GeneratePrepared(ctx context.Context, request PreparedRequest, 
 	}
 	seen := map[string]bool{}
 	for _, call := range m.ToolCalls {
-		if call.ID == "" || len(call.ID) > 200 || seen[call.ID] || call.Function.Name == "" || !json.Valid([]byte(call.Function.Arguments)) {
-			return m, usage, errors.New("模型工具参数或调用标识无效")
+		if call.ID == "" || len(call.ID) > 200 || seen[call.ID] || call.Function.Name == "" {
+			return m, usage, errors.New("模型工具名称或调用标识无效")
 		}
+		// Argument JSON is validated by the tool boundary so native protocols
+		// receive the same actionable rejection and closed call as JSON mode.
 		seen[call.ID] = true
 	}
 	return m, usage, nil

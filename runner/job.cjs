@@ -1,5 +1,6 @@
 // Trusted harness: generated scripts run as a separate UID, without credentials.
 // Production isolation is provided by the executor's required gVisor runtime.
+const { declarations, collectOutputs } = require("./outputs.cjs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const http = require("node:http");
@@ -13,8 +14,14 @@ const CSP =
 const checks = [];
 const details = {};
 let job;
-function check(name, detail, status = "passed") {
-  checks.push({ name, status, detail: String(detail).slice(0, 4000) });
+let artifacts = [];
+function check(name, detail, status = "passed", evidence = {}) {
+  checks.push({
+    name,
+    status,
+    detail: String(detail).slice(0, 4000),
+    ...evidence,
+  });
 }
 function safeName(name) {
   if (
@@ -32,14 +39,28 @@ function safeName(name) {
   return name;
 }
 async function loadFiles() {
-  const entries = Object.entries(job.files || {});
+  const textFiles = Object.entries(job.files || {}).map(([name, content]) => {
+    if (typeof content !== "string") throw Error("文本文件类型无效");
+    return [name, Buffer.from(content, "utf8")];
+  });
+  const binaryFiles = Object.entries(job.binary_files || {}).map(
+    ([name, content]) => {
+      if (
+        typeof content !== "string" ||
+        Buffer.from(content, "base64").toString("base64") !== content ||
+        Object.hasOwn(job.files || {}, name)
+      )
+        throw Error("二进制文件编码或路径无效");
+      return [name, Buffer.from(content, "base64")];
+    },
+  );
+  const entries = [...textFiles, ...binaryFiles];
   if (entries.length > 100) throw Error("文件数量超限");
   let total = 0;
   await fs.mkdir(ROOT, { recursive: true });
   for (const [name, content] of entries) {
     safeName(name);
-    if (typeof content !== "string" || Buffer.byteLength(content) > 262144)
-      throw Error("文件格式或大小无效");
+    if (content.length > 262144) throw Error("文件格式或大小无效");
     total += Buffer.byteLength(content);
     if (total > 2097152) throw Error("项目大小超限");
     const target = path.join(ROOT, name);
@@ -259,7 +280,10 @@ function runChild(command, args, { cwd = SCRATCH, env, seconds }) {
 
 function checkExit(name, result, seconds, includeStdout = false) {
   const passed = !result.limit && result.code === 0;
-  const output = [includeStdout ? result.out : "", result.err].filter(Boolean).join("\n").trim();
+  const output = [includeStdout ? result.out : "", result.err]
+    .filter(Boolean)
+    .join("\n")
+    .trim();
   check(
     name,
     result.limit
@@ -271,10 +295,17 @@ function checkExit(name, result, seconds, includeStdout = false) {
 }
 
 async function script() {
+  details.input_root = ROOT;
+  details.working_directory = SCRATCH;
+  details.output_location =
+    "Write declared output paths relative to the working directory; project input is read-only.";
   const p = job.parameters;
   safeName(p.entry);
   const ext = path.extname(p.entry);
-  if (!/^\.(?:[mc]?js|py|[mc]?ts|tsx)$/.test(ext) || !Object.hasOwn(job.files, p.entry))
+  if (
+    !/^\.(?:[mc]?js|py|[mc]?ts|tsx)$/.test(ext) ||
+    !Object.hasOwn(job.files, p.entry)
+  )
     throw Error("脚本入口必须是项目内的 JavaScript、TypeScript 或 Python 文件");
   if (typeof p.expected_stdout !== "string")
     throw Error("必须提供脚本预期标准输出，不能只凭退出成功验收");
@@ -286,6 +317,7 @@ async function script() {
   )
     throw Error("脚本参数无效");
 
+  declarations(p.outputs);
   await prepareScratch();
   let entry = path.join(ROOT, p.entry);
   let command = process.execPath;
@@ -306,16 +338,24 @@ async function script() {
       nodePaths: ["/opt/atoms/node_modules"],
       logLevel: "silent",
     });
-    if (bundle.outputFiles.length !== 1) throw Error("TypeScript 脚本必须能打包成单个入口");
+    if (bundle.outputFiles.length !== 1)
+      throw Error("TypeScript 脚本必须能打包成单个入口");
     // Keeping the bundle beside the entry preserves relative data-file paths.
-    entry = path.join(path.dirname(entry), commonJS ? ".atoms-entry.cjs" : ".atoms-entry.mjs");
+    entry = path.join(
+      path.dirname(entry),
+      commonJS ? ".atoms-entry.cjs" : ".atoms-entry.mjs",
+    );
     await fs.writeFile(entry, bundle.outputFiles[0].contents, { mode: 0o444 });
     check("typescript_transpile", "esbuild 转译成功");
   }
-  const result = await runChild(command, [...options, entry, ...(p.args || [])], {
-    seconds: 15,
-    env: { NODE_PATH: "/opt/atoms/node_modules" },
-  });
+  const result = await runChild(
+    command,
+    [...options, entry, ...(p.args || [])],
+    {
+      seconds: 15,
+      env: { NODE_PATH: "/opt/atoms/node_modules" },
+    },
+  );
   details.stdout = result.out;
   details.stderr = result.err;
   details.exit_code = result.code;
@@ -325,6 +365,14 @@ async function script() {
     `预期 ${JSON.stringify(p.expected_stdout.trim())}；实际 ${JSON.stringify(result.out.trim())}`,
     result.out.trim() === p.expected_stdout.trim() ? "passed" : "failed",
   );
+  if (checks.every((c) => c.status === "passed")) {
+    artifacts = await collectOutputs(SCRATCH, p.outputs || []);
+    if (artifacts.length)
+      check(
+        "artifact_collection",
+        `已回收 ${artifacts.length} 个声明文件并计算字节哈希`,
+      );
+  }
 }
 
 async function goProject() {
@@ -332,7 +380,9 @@ async function goProject() {
     throw Error("Go 项目需要根目录下的 go.mod");
   await prepareScratch();
   const go = "/usr/local/go/bin/go";
-  const mod = Object.hasOwn(job.files, "vendor/modules.txt") ? "vendor" : "readonly";
+  const mod = Object.hasOwn(job.files, "vendor/modules.txt")
+    ? "vendor"
+    : "readonly";
   const env = {
     CGO_ENABLED: "0",
     GOMAXPROCS: "1",
@@ -346,19 +396,40 @@ async function goProject() {
     GOWORK: "off",
   };
   // Seed a private cache from the image; build and test share it without cross-job writes.
-  const cache = await runChild("/bin/cp", ["-R", "/opt/atoms/go-cache", env.GOCACHE], {
-    seconds: 10,
-  });
-  if (cache.limit || cache.code !== 0) throw Error("Go 编译缓存初始化失败：" + cache.err);
+  const cache = await runChild(
+    "/bin/cp",
+    ["-R", "/opt/atoms/go-cache", env.GOCACHE],
+    {
+      seconds: 10,
+    },
+  );
+  if (cache.limit || cache.code !== 0)
+    throw Error("Go 编译缓存初始化失败：" + cache.err);
   const build = await runChild(go, ["build", "-o", SCRATCH + "/", "./..."], {
-    cwd: ROOT, env, seconds: 65,
+    cwd: ROOT,
+    env,
+    seconds: 65,
   });
-  details.go_build = { stdout: build.out, stderr: build.err, exit_code: build.code };
+  details.go_build = {
+    stdout: build.out,
+    stderr: build.err,
+    exit_code: build.code,
+  };
   if (!checkExit("go_build", build, 65)) return;
-  const test = await runChild(go, ["test", "-count=1", "-timeout=25s", "./..."], {
-    cwd: ROOT, env, seconds: 45,
-  });
-  details.go_test = { stdout: test.out, stderr: test.err, exit_code: test.code };
+  const test = await runChild(
+    go,
+    ["test", "-count=1", "-timeout=25s", "./..."],
+    {
+      cwd: ROOT,
+      env,
+      seconds: 45,
+    },
+  );
+  details.go_test = {
+    stdout: test.out,
+    stderr: test.err,
+    exit_code: test.code,
+  };
   checkExit("go_test", test, 45, true);
 }
 async function browser(html, test) {
@@ -374,6 +445,16 @@ async function browser(html, test) {
     )
       throw Error("交互检查需要至少一个断言，最多 30 步");
     for (const s of steps) {
+      if (
+        s.paths !== undefined &&
+        (!Array.isArray(s.paths) ||
+          !s.paths.length ||
+          s.paths.some(
+            (name) =>
+              typeof name !== "string" || !Object.hasOwn(job.files, name),
+          ))
+      )
+        throw Error("浏览器断言的 paths 必须指向实际输入文件");
       if (
         typeof s.requirement !== "string" ||
         !s.requirement.trim() ||
@@ -484,6 +565,10 @@ async function browser(html, test) {
           check(
             `interaction_${width}_${i + 1}`,
             `${s.requirement}：${s.action} ${s.selector}`,
+            "passed",
+            s.action.startsWith("expect_")
+              ? { requirement: s.requirement, paths: s.paths || ["index.html"] }
+              : {},
           );
         } catch (e) {
           check(
@@ -529,7 +614,10 @@ async function browser(html, test) {
     await goProject();
   else if (job.action === "run_project" && job.parameters.kind === "script")
     await script();
-  else if ((job.action === "run_project" && job.parameters.kind === "web") || job.action === "test_preview") {
+  else if (
+    (job.action === "run_project" && job.parameters.kind === "web") ||
+    job.action === "test_preview"
+  ) {
     const entry = job.parameters.entry || "index.html";
     const html = await buildHTML(entry);
     await browser(html, job.action === "test_preview");
@@ -555,6 +643,7 @@ async function browser(html, test) {
             : "failed",
         checks,
         details,
+        artifacts,
       }),
     );
     process.exitCode = 0;

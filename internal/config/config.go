@@ -12,14 +12,16 @@ import (
 const defaultMaxRequestBytes = 500 * 1024
 
 type Config struct {
-	ProviderTPM                                      int
-	ToolMode                                         string
-	Addr, DataDir, WebDir, PublicURL                 string
-	Protocol, BaseURL, Model, APIKey, Revision       string
-	RunnerURL, RunnerToken                           string
-	MaxCalls, MaxTools, MaxConcurrent, RunSeconds    int
-	DailyCalls, WorkspaceDailyCalls, MaxOutputTokens int
-	MaxRequestBytes                                  int
+	ProviderTPM                                                              int
+	ToolMode                                                                 string
+	Addr, DataDir, WebDir, PublicURL                                         string
+	Protocol, BaseURL, Model, APIKey, Revision                               string
+	RunnerURL, RunnerToken                                                   string
+	MaxCalls, MaxTools, MaxConcurrent, RunSeconds                            int
+	DailyCalls, WorkspaceDailyCalls, MaxOutputTokens                         int
+	MaxRequestBytes                                                          int
+	DelegateCalls, DelegateSeconds, ParentReserveCalls, ParentReserveSeconds int
+	RepeatFailures, ReplanBudget                                             int
 }
 
 func env(k, d string) string {
@@ -37,27 +39,33 @@ func number(k string, d int) int {
 }
 func Load() Config {
 	return Config{
-		ProviderTPM:         number("ATOMS_LLM_TPM", 40000),
-		ToolMode:            env("ATOMS_LLM_TOOL_MODE", "native"),
-		Addr:                env("ATOMS_ADDR", "127.0.0.1:8090"),
-		DataDir:             env("ATOMS_DATA_DIR", "data"),
-		WebDir:              env("ATOMS_WEB_DIR", "web/dist"),
-		PublicURL:           os.Getenv("ATOMS_PUBLIC_URL"),
-		Protocol:            env("ATOMS_LLM_PROTOCOL", "chat_completions"),
-		BaseURL:             strings.TrimRight(os.Getenv("ATOMS_LLM_BASE_URL"), "/"),
-		Model:               os.Getenv("ATOMS_LLM_MODEL"),
-		APIKey:              os.Getenv("ATOMS_LLM_API_KEY"),
-		Revision:            env("ATOMS_LLM_CONFIG_REVISION", core.ID()),
-		RunnerURL:           strings.TrimRight(os.Getenv("ATOMS_RUNNER_URL"), "/"),
-		RunnerToken:         os.Getenv("ATOMS_RUNNER_TOKEN"),
-		MaxCalls:            number("ATOMS_MAX_CALLS", 24),
-		MaxTools:            number("ATOMS_MAX_TOOLS", 64),
-		MaxConcurrent:       number("ATOMS_MAX_CONCURRENT", 2),
-		RunSeconds:          number("ATOMS_RUN_SECONDS", 600),
-		DailyCalls:          number("ATOMS_DAILY_CALLS", 2000),
-		WorkspaceDailyCalls: number("ATOMS_WORKSPACE_DAILY_CALLS", 1000),
-		MaxOutputTokens:     number("ATOMS_MAX_OUTPUT_TOKENS", 4096),
-		MaxRequestBytes:     number("ATOMS_MAX_REQUEST_BYTES", defaultMaxRequestBytes),
+		ProviderTPM:          number("ATOMS_LLM_TPM", 40000),
+		ToolMode:             env("ATOMS_LLM_TOOL_MODE", "native"),
+		Addr:                 env("ATOMS_ADDR", "127.0.0.1:8090"),
+		DataDir:              env("ATOMS_DATA_DIR", "data"),
+		WebDir:               env("ATOMS_WEB_DIR", "web/dist"),
+		PublicURL:            os.Getenv("ATOMS_PUBLIC_URL"),
+		Protocol:             env("ATOMS_LLM_PROTOCOL", "chat_completions"),
+		BaseURL:              strings.TrimRight(os.Getenv("ATOMS_LLM_BASE_URL"), "/"),
+		Model:                os.Getenv("ATOMS_LLM_MODEL"),
+		APIKey:               os.Getenv("ATOMS_LLM_API_KEY"),
+		Revision:             env("ATOMS_LLM_CONFIG_REVISION", core.ID()),
+		RunnerURL:            strings.TrimRight(os.Getenv("ATOMS_RUNNER_URL"), "/"),
+		RunnerToken:          os.Getenv("ATOMS_RUNNER_TOKEN"),
+		MaxCalls:             number("ATOMS_MAX_CALLS", 24),
+		MaxTools:             number("ATOMS_MAX_TOOLS", 64),
+		MaxConcurrent:        number("ATOMS_MAX_CONCURRENT", 2),
+		RunSeconds:           number("ATOMS_RUN_SECONDS", 600),
+		DailyCalls:           number("ATOMS_DAILY_CALLS", 2000),
+		WorkspaceDailyCalls:  number("ATOMS_WORKSPACE_DAILY_CALLS", 1000),
+		MaxOutputTokens:      number("ATOMS_MAX_OUTPUT_TOKENS", 4096),
+		MaxRequestBytes:      number("ATOMS_MAX_REQUEST_BYTES", defaultMaxRequestBytes),
+		DelegateCalls:        number("ATOMS_DELEGATE_CALLS", 8),
+		DelegateSeconds:      number("ATOMS_DELEGATE_SECONDS", 180),
+		ParentReserveCalls:   number("ATOMS_PARENT_RESERVE_CALLS", 3),
+		ParentReserveSeconds: number("ATOMS_PARENT_RESERVE_SECONDS", 30),
+		RepeatFailures:       number("ATOMS_REPEAT_FAILURES", 3),
+		ReplanBudget:         number("ATOMS_REPLAN_BUDGET", 2),
 	}
 }
 

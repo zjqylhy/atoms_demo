@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-func TestRunnerAllowsFiveRepairsAfterInitialFailure(t *testing.T) {
+func TestRunnerDoesNotTreatUnclassifiedReportsAsDeterministic(t *testing.T) {
 	var jobs atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
@@ -61,12 +61,6 @@ func TestRunnerAllowsFiveRepairsAfterInitialFailure(t *testing.T) {
 	for attempt := 1; attempt <= 7; attempt++ {
 		c := call("run_project", args).ToolCalls[0]
 		_, err := e.executeRunner(t.Context(), s, c, args, p)
-		if attempt == 7 {
-			if err == nil || !strings.Contains(err.Error(), "5 次上限") || jobs.Load() != 6 {
-				t.Fatalf("seventh attempt must be blocked, jobs=%d, err=%v", jobs.Load(), err)
-			}
-			break
-		}
 		if err != nil {
 			t.Fatalf("attempt %d: %v", attempt, err)
 		}
@@ -189,6 +183,9 @@ func TestStopRunnerWaitAndContinueOriginalJob(t *testing.T) {
 	job := call("run_project", args)
 	g := fakeModel(func(_ context.Context, m []core.ModelMessage, _ []model.Tool) (core.ModelMessage, core.Usage, error) {
 		if !strings.Contains(m[0].Content, "的 Alex。") {
+			if strings.Contains(core.JSON(m), "执行环境故障") {
+				return core.ModelMessage{}, core.Usage{}, fmt.Errorf("执行环境故障：recovered tool result received")
+			}
 			return assign, core.Usage{}, nil
 		}
 		last := m[len(m)-1]
@@ -269,5 +266,79 @@ func TestStopRunnerWaitAndContinueOriginalJob(t *testing.T) {
 	p = waitProject(t, e, p.ID, func(p *core.Project) bool { return p.Runs[third.ActiveRun].Status == "failed" })
 	if posts.Load() != 1 || len(p.Reports) != 1 || !strings.Contains(p.Runs[third.ActiveRun].Error, "recovered tool result received") {
 		t.Fatalf("the recorded environment failure was not returned on continue: %s", core.JSON(p.Public()))
+	}
+}
+
+func TestUnknownRecoveryKeepsIdentityAndHandsBackWithoutResubmission(t *testing.T) {
+	e, p := testEngine(t, nil)
+	s := scope{Owner: "alice", Project: p.ID, Task: "task", Run: "resume", Frame: "root", Epoch: 2}
+	args := map[string]any{"kind": "script", "entry": "input.js", "expected_stdout": "ok"}
+	message := call("run_project", args)
+	c := message.ToolCalls[0]
+	input := []byte("console.log('ok')")
+	p, err := e.Store.Mutate(s.Owner, p.ID, map[string][]byte{core.Hash(input): input}, func(p *core.Project) error {
+		p.CurrentTask, p.ActiveRun, p.Epoch = s.Task, s.Run, s.Epoch
+		p.Files = core.Manifest{"input.js": {Hash: core.Hash(input), Size: len(input), Kind: "code"}}
+		p.Runs[s.Run] = &core.Run{ID: s.Run, Status: "running"}
+		p.Tasks[s.Task] = &core.Task{ID: s.Task, Root: s.Frame, Mode: "build", Steps: map[string]core.Step{},
+			Frames:       map[string]*core.Frame{s.Frame: {ID: s.Frame, Role: "Mike"}, "old-child": {ID: "old-child", Role: "Alex", Messages: []core.ModelMessage{message}}},
+			RunnerAction: &core.RunnerAction{JobID: "original-job", FrameID: "old-child", CallID: c.ID, Call: &c, Inputs: core.Clone(p.Files), RunID: "original-run", Epoch: 1, Unknown: true}}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var requests atomic.Int32
+	var ready atomic.Bool
+	digest := p.Files.Digest()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		if r.Method != "GET" || r.URL.Path != "/jobs/original-job" {
+			t.Errorf("recovery submitted or changed job identity: %s %s", r.Method, r.URL.Path)
+		}
+		if !ready.Load() {
+			writeRunnerTestError(w, http.StatusNotFound, "job_not_found")
+			return
+		}
+		json.NewEncoder(w).Encode(runnerReply{ID: "original-job", Digest: digest, Status: "passed", Checks: []core.Check{{Name: "script_exit", Status: "passed"}}})
+	}))
+	defer server.Close()
+	e.Config.RunnerURL, e.Config.RunnerToken = server.URL, "test"
+	if handled, err := e.recoverExternal(t.Context(), s, p); !handled || err != nil {
+		t.Fatalf("unknown result aborted parent: handled=%t err=%v", handled, err)
+	}
+	p, _ = e.Store.Get(s.Owner, s.Project)
+	task := p.Tasks[s.Task]
+	if task.RunnerAction == nil || task.RunnerAction.JobID != "original-job" || task.LastHandoff == nil || task.LastHandoff.Status != "blocked" {
+		t.Fatal("missing job was incorrectly considered never executed", task)
+	}
+	if handled, err := e.recoverExternal(t.Context(), s, p); handled || err != nil || requests.Load() != 1 {
+		t.Fatal("repeated unknown recovery in same run", handled, err, requests.Load())
+	}
+	child := s
+	child.Frame = "old-child"
+	if _, err := e.executeRunner(t.Context(), child, c, args, p); err == nil || requests.Load() != 1 {
+		t.Fatal("unknown call reopened its external action", err)
+	}
+	// A later ordinary continue may query the same job again and close the
+	// earlier unknown disposition with the actual committed result.
+	s.Run, s.Epoch = "next-resume", 3
+	p, err = e.Store.Mutate(s.Owner, p.ID, nil, func(p *core.Project) error {
+		p.ActiveRun, p.Epoch = s.Run, s.Epoch
+		p.Runs[s.Run] = &core.Run{ID: s.Run, Status: "running"}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready.Store(true)
+	if handled, err := e.recoverExternal(t.Context(), s, p); !handled || err != nil {
+		t.Fatal("actual receipt did not resolve recovery", handled, err)
+	}
+	p, _ = e.Store.Get(s.Owner, s.Project)
+	task = p.Tasks[s.Task]
+	key := "old-child/" + c.ID
+	if requests.Load() != 2 || task.RunnerAction != nil || len(p.Reports) != 1 || task.Dispositions[key].Fact.ResolvedBy != key || task.Steps[key].Fact == nil {
+		t.Fatal("recovered action was not atomically closed", task)
 	}
 }

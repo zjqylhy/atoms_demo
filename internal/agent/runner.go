@@ -15,7 +15,42 @@ import (
 	"time"
 )
 
-const maxRunRepairs = 5
+type externalPendingError struct{ job string }
+
+func (e *externalPendingError) Error() string {
+	return "执行结果尚未确认；原作业 " + e.job + " 已保留，只能核对原作业，不能重新执行"
+}
+
+// Recovery is owned by the execution adapter. The loop sees only whether a
+// recovery action was handled, while unresolved work is returned as evidence.
+func (e *Engine) recoverExternal(ctx context.Context, s scope, p *core.Project) (bool, error) {
+	t := p.Tasks[s.Task]
+	action := t.RunnerAction
+	if s.Frame != t.Root || action == nil || action.LastLookupRun == s.Run {
+		return false, nil
+	}
+	needed := action.InstructionVersion != len(t.InstructionMessages) || (action.RunID != "" && action.RunID != s.Run) ||
+		(action.FrameID != t.Root && !strings.HasPrefix(action.FrameID, t.Root+"/"))
+	if !needed {
+		return false, nil
+	}
+	err := e.recoverRunner(ctx, s, p, action)
+	var pending *externalPendingError
+	if !errors.As(err, &pending) {
+		return true, err
+	}
+	_, saveErr := e.Store.Mutate(s.Owner, s.Project, nil, func(p *core.Project) error {
+		if err := p.Fence(s.Run, s.Epoch); err != nil {
+			return err
+		}
+		t := p.Tasks[s.Task]
+		t.LastHandoff = &core.DelegationResult{Status: "blocked", Reason: pending.Error(), Evidence: []string{action.FrameID + "/" + action.CallID}, Artifacts: core.Clone(p.Files), Todo: []string{"保留原作业标识，稍后继续核对；可先诊断其他输入"}}
+		t.Frames[t.Root].Messages = append(t.Frames[t.Root].Messages, core.ModelMessage{Role: "user", Content: "执行器恢复事实（非用户新指令）：" + core.JSON(t.LastHandoff)})
+		p.Event("handoff", "system", pending.Error(), t.LastHandoff)
+		return nil
+	})
+	return true, saveErr
+}
 
 func executionType(args map[string]any) string {
 	switch str(args, "kind") {
@@ -71,6 +106,7 @@ type runnerClient struct {
 }
 
 type runnerReply struct {
+	Artifacts  []runnerArtifact `json:"artifacts"`
 	httpStatus int
 	ID         string         `json:"id"`
 	Digest     string         `json:"digest"`
@@ -105,7 +141,7 @@ func (c runnerClient) request(ctx context.Context, method, route string, body []
 	}
 	defer resp.Body.Close()
 	reply := runnerReply{httpStatus: resp.StatusCode}
-	const maxReport = 2 * 1024 * 1024
+	const maxReport = 4 * 1024 * 1024
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxReport+1))
 	if err != nil {
 		return reply, err
@@ -175,9 +211,23 @@ func (c runnerClient) result(ctx context.Context, jobID, digest string, body []b
 }
 
 func (e *Engine) executeRunner(ctx context.Context, s scope, c core.Call, args map[string]any, p *core.Project) (string, error) {
-	action := core.RunnerAction{
+	action := core.RunnerAction{Inputs: core.Clone(p.Files), RunID: s.Run, Epoch: s.Epoch, Call: &c,
 		FrameID: s.Frame, CallID: c.ID, InstructionVersion: s.InstructionVersion,
 		JobID: core.Hash([]byte(s.Task + "/" + s.Frame + "/" + c.ID)),
+	}
+	if plan := p.Tasks[s.Task].Plan; plan != nil {
+		action.PlanRevision = plan.Revision
+	}
+	if pending := p.Tasks[s.Task].RunnerAction; pending != nil {
+		if pending.FrameID == s.Frame && pending.CallID == c.ID {
+			if pending.Unknown && pending.LastLookupRun == s.Run {
+				return "", &externalPendingError{job: pending.JobID}
+			}
+			return e.runRunner(ctx, s, c, args, p, *pending, true)
+		}
+		return e.record(s, c, nil, func(*core.Project) (any, error) {
+			return nil, errors.New("还有未确认的原作业，必须先核对原作业，不能启动新作业")
+		})
 	}
 	return e.runRunner(ctx, s, c, args, p, action, false)
 }
@@ -190,6 +240,10 @@ func (e *Engine) recoverRunner(ctx context.Context, s scope, p *core.Project, ac
 		return errors.New("原执行器动作上下文缺失")
 	}
 	calls, _ := pendingCalls(frame.Messages)
+	if action.Call != nil {
+		calls = []core.Call{*action.Call}
+	}
+	s.InstructionVersion = action.InstructionVersion
 	for _, call := range calls {
 		if call.ID != action.CallID {
 			continue
@@ -215,28 +269,42 @@ func (e *Engine) runRunner(ctx context.Context, s scope, c core.Call, args map[s
 	if endpoint.Scheme != "https" && !(endpoint.Scheme == "http" && (endpoint.Hostname() == "127.0.0.1" || endpoint.Hostname() == "localhost")) {
 		return "", errors.New("远程执行服务必须使用 HTTPS")
 	}
-	failures := 0
-	for _, report := range p.Reports {
-		if report.Status == "failed" && (report.Kind == "run" || report.Kind == "browser") {
-			var d map[string]any
-			_ = json.Unmarshal(report.Details, &d)
-			if d["run_id"] == s.Run && runnerFailureCode(report.Status, report.Checks, d) == "" {
-				failures++
-			}
+	inputs := action.Inputs
+	if inputs == nil {
+		inputs = core.Clone(p.Files)
+	}
+	jobID, digest := action.JobID, inputs.Digest()
+	declared, decodeErr := decodeArgument[[]core.OutputDeclaration](args, "outputs")
+	if decodeErr != nil {
+		return "", decodeErr
+	}
+	assertions, decodeErr := decodeArgument[[]core.ArtifactAssertion](args, "assertions")
+	if decodeErr != nil {
+		return "", decodeErr
+	}
+	if err := validateAssertions(assertions); err != nil {
+		fact := actionFact(p, s, c)
+		fact.Deterministic = true
+		fact.Conditions = "artifact_assertion_schema"
+		s.fact = &fact
+		if err := e.admitTool(s, c, fact); err != nil {
+			return "", err
 		}
+		return e.record(s, c, nil, func(*core.Project) (any, error) { return nil, err })
 	}
-	// The initial failed execution does not use one of the repair attempts.
-	if !lookupOnly && failures > maxRunRepairs {
-		return "", fmt.Errorf("自动运行修复已达到 %d 次上限，请查看失败记录后调整任务", maxRunRepairs)
+	if err := validateOutputDeclarations(declared, inputs); err != nil {
+		return e.record(s, c, nil, func(*core.Project) (any, error) { return nil, err })
 	}
-	jobID, digest := action.JobID, p.Files.Digest()
+	if len(declared) > 0 && str(args, "kind") != "script" {
+		return e.record(s, c, nil, func(*core.Project) (any, error) { return nil, errors.New("只有脚本模式可以声明生成输出") })
+	}
 	var body []byte
 	if !lookupOnly {
-		files, err := e.Store.Files(s.Owner, p.Files)
+		files, binaryFiles, err := e.runnerFiles(s.Owner, inputs)
 		if err != nil {
 			return "", err
 		}
-		body = []byte(core.JSON(map[string]any{"id": jobID, "digest": digest, "files": files, "action": c.Function.Name, "parameters": args}))
+		body = []byte(core.JSON(map[string]any{"id": jobID, "digest": digest, "files": files, "binary_files": binaryFiles, "action": c.Function.Name, "parameters": args}))
 		// Register the tool before external I/O. A later instruction can let it finish
 		// in this run, or let a resumed run look up the same job without submitting it.
 		_, err = e.Store.Mutate(s.Owner, s.Project, nil, func(p *core.Project) error {
@@ -263,11 +331,32 @@ func (e *Engine) runRunner(ctx context.Context, s scope, c core.Call, args map[s
 	result, err := client.result(ctx, jobID, digest, body, lookupOnly, func(message string) error {
 		return e.noteWait(s, "runner_wait", role, message)
 	})
-	if err != nil {
-		return "", err
-	}
 	if lookupOnly && result.is(http.StatusNotFound, "job_not_found") {
-		return "", e.skipPendingTools(s, []core.Call{c})
+		// A missing receipt cannot prove that a previously dispatched action did
+		// not execute. Keep its identity instead of reopening a submission path.
+		err = &externalPendingError{job: jobID}
+	}
+	if err != nil {
+		_, _ = e.Store.Mutate(s.Owner, s.Project, nil, func(p *core.Project) error {
+			if err := p.Fence(s.Run, s.Epoch); err != nil {
+				return err
+			}
+			task := p.Tasks[s.Task]
+			if task.RunnerAction != nil {
+				task.RunnerAction.Unknown = true
+				task.RunnerAction.LastLookupRun = s.Run
+			}
+			if task.Dispositions == nil {
+				task.Dispositions = map[string]core.Step{}
+			}
+			key := s.Frame + "/" + c.ID
+			task.Dispositions[key] = core.Step{ID: key, FrameID: s.Frame, Tool: c.Function.Name, At: core.Now(), Fact: &core.ActionFact{Disposition: "unknown", ErrorClass: "unknown", Inputs: inputs, Recovery: jobID}}
+			return nil
+		})
+		if ctx.Err() != nil {
+			return "", ctx.Err()
+		}
+		return "", &externalPendingError{job: jobID}
 	}
 	if result.httpStatus != http.StatusOK {
 		rejection := fmt.Errorf("执行服务 HTTP %d：%s", result.httpStatus, e.Config.Redact(result.Error))
@@ -293,21 +382,69 @@ func (e *Engine) runRunner(ctx context.Context, s scope, c core.Call, args map[s
 	} else {
 		result.Details["execution"] = executionType(args)
 	}
+	blobs, outputs, collectionErr := collectRunnerArtifacts(declared, result.Artifacts, inputs)
+	if result.Status == "passed" && collectionErr != nil {
+		result.Status = "failed"
+		result.Checks = append(result.Checks, core.Check{Name: "artifact_collection", Status: "failed", Detail: collectionErr.Error()})
+	}
+	if result.Status == "passed" && len(assertions) > 0 {
+		bytesByPath := map[string][]byte{}
+		for name, file := range inputs {
+			data, err := e.Store.Blob(s.Owner, file.Hash)
+			if err != nil {
+				return "", err
+			}
+			bytesByPath[name] = data
+		}
+		for name, file := range outputs {
+			bytesByPath[name] = blobs[file.Hash]
+		}
+		for _, check := range artifactChecks(bytesByPath, assertions) {
+			result.Checks = append(result.Checks, check)
+			if check.Status != "passed" {
+				result.Status = "failed"
+			}
+		}
+	}
+	if result.Status != "passed" {
+		blobs = nil
+		outputs = nil
+	}
 	report := core.Report{ID: jobID, Kind: kind, Digest: digest, At: core.Now(), Status: result.Status, Checks: result.Checks, Details: json.RawMessage(core.JSON(result.Details))}
-	saved, err := e.record(s, c, nil, func(p *core.Project) (any, error) {
+	if action.Inputs != nil {
+		report.Evidence = &core.ReportEvidence{TaskID: s.Task, InstructionVersion: action.InstructionVersion, PlanRevision: action.PlanRevision, Inputs: inputs, Outputs: outputs, RunID: action.RunID, Epoch: action.Epoch}
+	}
+	fact := actionFact(p, s, c)
+	if failureCode != "" {
+		fact.ErrorClass = "transient"
+		fact.ErrorCode = failureCode
+		fact.Recovery = jobID
+	}
+	s.fact = &fact
+	saved, err := e.record(s, c, blobs, func(p *core.Project) (any, error) {
 		if p.Files.Digest() != digest {
-			return nil, errors.New("执行期间文件变化，报告不能用于新版本")
+			return nil, errors.New("执行输入版本已变化，拒绝回收与旧报告证明新版本")
+		}
+		if len(outputs) > 0 && len(p.Tasks[s.Task].InstructionMessages) != action.InstructionVersion {
+			return nil, errors.New("输出所属指令版本已失效，拒绝回收")
+		}
+		next := core.Clone(p.Files)
+		for name, file := range outputs {
+			next[name] = file
+		}
+		if err := next.Validate(); err != nil {
+			return nil, err
+		}
+		p.Files = next
+		for name, file := range outputs {
+			if file.Binary {
+				replaceResourceMaterial(p.Tasks[s.Task], s.Frame, core.WorkingMaterial{Resource: "file:" + name, Version: file.Hash, Source: s.Frame + "/" + c.ID, Reason: "已回收的二进制产物，内容验收以报告为准", Recovery: "下载文件或使用内容断言检查"})
+			} else {
+				rememberFile(p, s, c, name, string(blobs[file.Hash]))
+			}
 		}
 		p.Reports = append(p.Reports, report)
-		result := map[string]any{"id": report.ID, "status": report.Status, "checks": report.Checks}
-		if failureCode != "" {
-			result["failure_code"] = failureCode
-			result["next_action"] = "执行环境故障，请在环境恢复后重新检查当前产物"
-		}
-		return result, nil
+		return map[string]any{"id": report.ID, "status": report.Status, "checks": report.Checks, "outputs": outputs, "failure_code": failureCode}, nil
 	})
-	if err == nil && failureCode != "" {
-		return "", fmt.Errorf("执行环境故障，进度已保留：%s", result.Checks[0].Detail)
-	}
 	return saved, err
 }

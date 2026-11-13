@@ -62,10 +62,15 @@ func (e *Engine) skipPendingTools(s scope, calls []core.Call) error {
 		skipped := false
 		for _, call := range calls {
 			content := `{"ok":false,"skipped":true,"error":"收到新指令，此工具未启动"}`
-			if child := task.Frames[s.Frame+"/"+call.ID]; call.Function.Name == "assign_step" && child != nil {
+			if child := task.Frames[s.Frame+"/"+call.ID]; toolProtocols[call.Function.Name].control == "delegate" && child != nil {
 				content = core.JSON(map[string]any{"ok": true, "result": redirectedDelegation(p, child.Role)})
 			} else {
 				skipped = true
+				if task.Dispositions == nil {
+					task.Dispositions = map[string]core.Step{}
+				}
+				key := s.Frame + "/" + call.ID
+				task.Dispositions[key] = core.Step{ID: key, FrameID: s.Frame, Tool: call.Function.Name, Result: content, At: core.Now(), Fact: &core.ActionFact{Disposition: "not_started", ErrorClass: "control", ErrorCode: "new_instruction"}, ArgsHash: core.Hash([]byte(call.Function.Name + "\n" + call.Function.Arguments))}
 			}
 			frame.Messages = append(frame.Messages, core.ModelMessage{
 				Role: "tool", ToolCallID: call.ID, Content: content,

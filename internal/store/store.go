@@ -116,8 +116,22 @@ func (s *Store) Mutate(owner, id string, blobs map[string][]byte, f func(*core.P
 		return nil, e
 	}
 	referenced := map[string]bool{}
-	for _, file := range p.Files {
-		referenced[file.Hash] = true
+	reference := func(manifest core.Manifest) {
+		for _, file := range manifest {
+			referenced[file.Hash] = true
+		}
+	}
+	reference(p.Files)
+	// Snapshot imports must retain the bytes behind saved history as well as
+	// the current draft. Unreferenced blobs are still excluded.
+	for _, task := range p.Tasks {
+		reference(task.Base)
+		for _, checkpoint := range task.Checkpoints {
+			reference(checkpoint.Manifest)
+		}
+	}
+	for _, version := range p.Versions {
+		reference(version.Manifest)
 	}
 	for hash, content := range blobs {
 		if !referenced[hash] {

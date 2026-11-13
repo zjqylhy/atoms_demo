@@ -10,6 +10,7 @@ import (
 	"io"
 	"mockatoms/internal/core"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,6 +34,10 @@ func checkArtifacts(files map[string]string, manifest core.Manifest) core.Report
 	sort.Strings(names)
 	for _, name := range names {
 		content := files[name]
+		if manifest[name].Binary {
+			add(name, "not_run", "二进制文件已保存，须使用内容断言覆盖验收条件")
+			continue
+		}
 		if strings.TrimSpace(content) == "" {
 			add(name, "failed", "文件内容为空")
 			continue
@@ -117,14 +122,31 @@ func checkArtifacts(files map[string]string, manifest core.Manifest) core.Report
 	return r
 }
 func completionCheck(p *core.Project) error {
-	digest := p.Files.Digest()
+	task := p.Tasks[p.CurrentTask]
+	manifest, err := deliveryManifest(p, task)
+	if err != nil {
+		return err
+	}
+	if err := scopedAcceptance(p, task); err != nil {
+		return err
+	}
+	staticCovered := map[string]bool{}
 	passed := map[string]bool{}
 	for _, r := range p.Reports {
-		if r.Digest != digest {
+		if !reportCurrent(p, task, r) {
 			continue
 		}
 		kind := r.Kind
 		ok := r.Status == "passed"
+		if kind == "static" && ok {
+			checked := p.Files
+			if r.Evidence != nil {
+				checked = r.Evidence.Inputs
+			}
+			for name := range checked {
+				staticCovered[name] = true
+			}
+		}
 		if execution := reportExecution(r); execution != "" {
 			kind = execution
 		}
@@ -144,11 +166,22 @@ func completionCheck(p *core.Project) error {
 			passed[kind] = passed["run"]
 		}
 	}
-	if !passed["static"] {
-		return errors.New("当前文件必须先通过 check_artifacts")
+	for name := range manifest {
+		if !staticCovered[name] {
+			return fmt.Errorf("当前交付范围必须先通过 check_artifacts：%s", name)
+		}
 	}
 	web, script, typescript, python, golang := false, false, false, false, false
-	for name, f := range p.Files {
+	for name, f := range manifest {
+		if task != nil && task.Plan != nil && task.Plan.Delivery != nil {
+			d := task.Plan.Delivery
+			if !slices.Contains(d.Targets, name) && !slices.Contains(d.Preserve, name) {
+				continue
+			}
+		}
+		if f.Binary && (task == nil || task.Plan == nil || task.Plan.Delivery == nil) {
+			return errors.New("二进制交付必须声明交付对象及内容验收条件")
+		}
 		if f.ReadOnly {
 			continue
 		}

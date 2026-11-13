@@ -13,6 +13,7 @@ import (
 
 type contextHistory struct {
 	system       core.ModelMessage
+	materials    []core.ModelMessage
 	messages     []core.ModelMessage
 	requirements []contextRequirement
 	duplicates   map[string]bool
@@ -72,29 +73,24 @@ func uncoveredText(s string, through int) string {
 // project keeps tool-call boundaries independent of the range summarized as dialogue.
 func (h contextHistory) project(tools *core.ContextSummary, dialogue *core.DialogueSummary) ([]core.ModelMessage, int) {
 	messages := []core.ModelMessage{h.system}
+	messages = append(messages, h.materials...)
+	live := false
+	for _, r := range h.requirements {
+		live = live || r.Kind == instructionKind
+	}
+	if len(h.requirements) > 0 && !live {
+		messages = append(messages, requirementMessage(h.requirements))
+	}
 	if tools == nil && dialogue == nil {
 		messages = append(messages, h.messages...)
-		for _, r := range h.requirements {
-			if r.Kind == instructionKind {
-				messages = append(messages, requirementMessage(h.requirements))
-				break
-			}
+		if live {
+			messages = append(messages, requirementMessage(h.requirements))
 		}
 		return messages, len(messages)
 	}
 	var covered map[string]int
 	if dialogue != nil {
 		covered = dialogue.Covered
-	}
-	var requirements []contextRequirement
-	for _, r := range h.requirements {
-		r.Text = uncoveredText(r.Text, covered[r.Source])
-		if r.Text != "" {
-			requirements = append(requirements, r)
-		}
-	}
-	if len(requirements) != 0 {
-		messages = append(messages, requirementMessage(requirements))
 	}
 	cut := 0
 	if tools != nil {
@@ -115,7 +111,7 @@ func (h contextHistory) project(tools *core.ContextSummary, dialogue *core.Dialo
 		if i < cut {
 			m = core.ModelMessage{Role: m.Role, Content: m.Content}
 		}
-		if through := covered[frameSource(i)]; through > 0 {
+		if through := covered[frameSource(i)]; through > 0 && m.Role != "user" {
 			m.Content = uncoveredText(m.Content, through)
 			if m.Content == "" && len(m.ToolCalls) == 0 {
 				continue
@@ -125,6 +121,9 @@ func (h contextHistory) project(tools *core.ContextSummary, dialogue *core.Dialo
 	}
 	if completeFrom == 0 {
 		completeFrom = len(messages)
+	}
+	if live {
+		messages = append(messages, requirementMessage(h.requirements))
 	}
 	return messages, completeFrom
 }
@@ -138,23 +137,9 @@ type dialogueLine struct {
 
 func (h contextHistory) oldDialogue(tools *core.ContextSummary) []dialogueLine {
 	var lines []dialogueLine
-	latestCorrection := -1
-	latestInstruction := -1
-	for i, r := range h.requirements {
-		if r.Kind == "plan_feedback" {
-			latestCorrection = i
-		} else if r.Kind == instructionKind {
-			latestInstruction = i
-		}
-	}
-	for i, r := range h.requirements {
-		if i != latestCorrection && i != latestInstruction && i < len(h.requirements)-1 && r.Text != "" {
-			lines = append(lines, dialogueLine{ID: r.Source, Role: "user", Text: r.Text, Question: r.Question})
-		}
-	}
 	for i := 1; i < h.recent; i++ {
 		m := h.messages[i]
-		if i == h.latestUser || !h.isDialogue(i) || h.duplicate(i) {
+		if m.Role == "user" || i == h.latestUser || !h.isDialogue(i) || h.duplicate(i) {
 			continue
 		}
 		if len(m.ToolCalls) != 0 && (tools == nil || i >= tools.Through) {

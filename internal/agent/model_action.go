@@ -2,6 +2,7 @@ package agent
 
 import (
 	"errors"
+	"fmt"
 	"mockatoms/internal/core"
 	"mockatoms/internal/model"
 )
@@ -17,7 +18,13 @@ func (e *Engine) beginModelCall(s scope, role string, prepared preparedContext) 
 	if err := s.checkInstruction(p); err != nil {
 		return err
 	}
-	if err := e.Store.ReserveCall(s.Owner, e.Config.DailyCalls, e.Config.WorkspaceDailyCalls); err != nil {
+	if reason := e.delegationBoundary(p, s, false); reason != "" {
+		return errDelegateBudget
+	}
+	if p.Runs[s.Run].Calls >= e.Config.MaxCalls {
+		return errors.New("达到本次模型调用上限，进度已保存")
+	}
+	if err := e.Quota.ReserveCall(s.Owner, e.Config.DailyCalls, e.Config.WorkspaceDailyCalls); err != nil {
 		return err
 	}
 	_, err = e.Store.Mutate(s.Owner, s.Project, nil, func(p *core.Project) error {
@@ -35,6 +42,9 @@ func (e *Engine) beginModelCall(s scope, role string, prepared preparedContext) 
 			})
 		}
 		p.Runs[s.Run].Calls++
+		if d := p.Tasks[s.Task].Frames[s.Frame].Delegation; d != nil {
+			d.Calls++
+		}
 		p.Runs[s.Run].Usage.Known = false
 		if prepared.dialogue != nil {
 			p.Event("model_call", role, "正在生成旧对话摘要", map[string]any{"purpose": "dialogue_summary", "request_bytes": prepared.request.ByteSize()})
@@ -75,10 +85,21 @@ func (e *Engine) saveModelReply(s scope, message core.ModelMessage, usage core.U
 		}
 		if failure != nil {
 			var formatError *model.ActionFormatError
-			if allowRepair && errors.As(failure, &formatError) {
+			if errors.As(failure, &formatError) {
+				feedback := core.JSON(e.failureFeedback(formatError))
+				message.InvalidAction = true
+				frame.Messages = append(frame.Messages, message)
+				if task.Dispositions == nil {
+					task.Dispositions = map[string]core.Step{}
+				}
+				key := s.Frame + "/model:" + s.Run + ":" + fmt.Sprint(r.Calls)
+				task.Dispositions[key] = core.Step{ID: key, FrameID: s.Frame, At: core.Now(), Result: feedback, Fact: &core.ActionFact{Disposition: "rejected", ErrorClass: "format"}}
+				if !allowRepair {
+					return nil
+				}
 				reply.formatRepair = true
 				r.FormatRepairs++
-				frame.Messages = append(frame.Messages, message, core.ModelMessage{Role: "user", Content: formatFeedbackPrefix + formatError.Error() + "。请重新生成当前动作。只输出一个完整 JSON 对象，最后一个右花括号后立即结束，不追加说明、代码围栏或第二个对象。content 用字符串，无说明时填空字符串。calls 用数组，有动作时只放一个，无动作时填 []。"})
+				frame.Messages = append(frame.Messages, core.ModelMessage{Role: "user", Content: formatFeedbackPrefix + feedback + "。请根据校验问题重新生成当前动作，不要把反馈当作可执行内容。只输出一个完整 JSON 对象，最后一个右花括号后立即结束，不追加说明、代码围栏或第二个对象。content 用字符串，无说明时填空字符串。calls 用数组，有动作时只放一个，无动作时填 []。"})
 				p.Event("format_repair", frame.Role, "模型动作格式无效，未执行；正在修正格式", nil)
 			}
 			return nil
@@ -98,7 +119,14 @@ func (e *Engine) saveModelReply(s scope, message core.ModelMessage, usage core.U
 		if len(message.ToolCalls) == 0 {
 			if s.Frame != task.Root {
 				frame.Complete = true
-				frame.Result = message.Content
+				frame.Outcome = &core.DelegationResult{Status: "completed", Reason: "专家返回子目标结果，最终交付仍需验收", Summary: message.Content, Artifacts: core.Clone(p.Files)}
+				for key, step := range task.Steps {
+					if step.FrameID == frame.ID {
+						frame.Outcome.Evidence = append(frame.Outcome.Evidence, key)
+					}
+				}
+				task.LastHandoff = frame.Outcome
+				frame.Result = core.JSON(frame.Outcome)
 				p.Event("handoff", frame.Role, "已返回工作结果", nil)
 			} else {
 				frame.Messages = append(frame.Messages, core.ModelMessage{Role: "user", Content: nextActionPrompt})

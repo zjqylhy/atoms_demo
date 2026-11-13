@@ -35,6 +35,7 @@ type FileInfo = {
   size: number;
   kind: string;
   read_only?: boolean;
+  binary?: boolean;
 };
 type Report = {
   id: string;
@@ -53,6 +54,7 @@ type Version = {
   reports: Report[];
 };
 type Task = {
+  last_handoff?: {status:string;reason:string;evidence?:string[];todo?:string[];artifacts?:Record<string,FileInfo>};
   id: string;
   goal: string;
   mode: string;
@@ -928,6 +930,14 @@ export default function App() {
               <X size={15} />
             </button>
           </div>
+        )}
+        {task?.last_handoff && !running && task.status === "failed" && (
+          <details className="error-banner">
+            <summary>{task.last_handoff.reason}</summary>
+            <p>已保留 {Object.keys(task.last_handoff.artifacts || {}).length} 个文件；可继续核对已有结果并调整下一步。</p>
+            {!!task.last_handoff.evidence?.length && <p>关联 {task.last_handoff.evidence.length} 条实际执行记录，可在任务过程查看。</p>}
+            {task.last_handoff.todo?.map((item,index) => <p key={index}>{item}</p>)}
+          </details>
         )}
         {!project ? (
           <div className="landing">

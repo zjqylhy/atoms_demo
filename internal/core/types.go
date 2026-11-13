@@ -49,6 +49,7 @@ type File struct {
 	Size     int    `json:"size"`
 	Kind     string `json:"kind"`
 	ReadOnly bool   `json:"read_only,omitempty"`
+	Binary   bool   `json:"binary,omitempty"`
 }
 type Manifest map[string]File
 
@@ -99,10 +100,45 @@ type Message struct {
 	Kind string `json:"kind,omitempty"`
 }
 type Plan struct {
-	Revision   string   `json:"revision"`
-	Text       string   `json:"text"`
-	Acceptance []string `json:"acceptance"`
-	Approved   bool     `json:"approved"`
+	Revision   string         `json:"revision"`
+	Text       string         `json:"text"`
+	Acceptance []string       `json:"acceptance"`
+	Approved   bool           `json:"approved"`
+	Delivery   *DeliveryScope `json:"delivery,omitempty"`
+}
+
+type DeliveryScope struct {
+	Targets  []string            `json:"targets"`
+	Inputs   []string            `json:"inputs"`
+	Preserve []string            `json:"preserve"`
+	Criteria []DeliveryCriterion `json:"criteria"`
+}
+type DeliveryCriterion struct {
+	Requirement string   `json:"requirement"`
+	Paths       []string `json:"paths"`
+}
+type ArtifactAssertion struct {
+	Path        string `json:"path"`
+	Kind        string `json:"kind"`
+	Requirement string `json:"requirement"`
+	Expected    string `json:"expected,omitempty"`
+	Member      string `json:"member,omitempty"`
+	MemberMatch string `json:"member_match,omitempty"`
+	Count       int    `json:"count,omitempty"`
+}
+type OutputDeclaration struct {
+	Path    string `json:"path"`
+	Format  string `json:"format"`
+	OldHash string `json:"old_hash"`
+}
+type ReportEvidence struct {
+	TaskID             string   `json:"task_id"`
+	InstructionVersion int      `json:"instruction_version"`
+	PlanRevision       string   `json:"plan_revision,omitempty"`
+	Inputs             Manifest `json:"inputs"`
+	Outputs            Manifest `json:"outputs,omitempty"`
+	RunID              string   `json:"run_id,omitempty"`
+	Epoch              int64    `json:"epoch,omitempty"`
 }
 type Question struct {
 	ID      string   `json:"id"`
@@ -124,14 +160,82 @@ type Usage struct {
 	Known  bool `json:"known"`
 }
 type Frame struct {
-	ID       string           `json:"id"`
-	Role     string           `json:"role"`
-	Goal     string           `json:"goal"`
-	Messages []ModelMessage   `json:"messages"`
-	Complete bool             `json:"complete"`
-	Result   string           `json:"result,omitempty"`
-	Context  *ContextSummary  `json:"context_summary,omitempty"`
-	Dialogue *DialogueSummary `json:"dialogue_summary,omitempty"`
+	ID          string                     `json:"id"`
+	Role        string                     `json:"role"`
+	Goal        string                     `json:"goal"`
+	Messages    []ModelMessage             `json:"messages"`
+	Complete    bool                       `json:"complete"`
+	Result      string                     `json:"result,omitempty"`
+	Context     *ContextSummary            `json:"context_summary,omitempty"`
+	Dialogue    *DialogueSummary           `json:"dialogue_summary,omitempty"`
+	Materials   map[string]WorkingMaterial `json:"materials,omitempty"`
+	Delegation  *Delegation                `json:"delegation,omitempty"`
+	Outcome     *DelegationResult          `json:"outcome,omitempty"`
+	YieldStatus string                     `json:"yield_status,omitempty"`
+	YieldReason string                     `json:"yield_reason,omitempty"`
+}
+
+type Delegation struct {
+	Subgoal     string   `json:"subgoal"`
+	GoalVersion int      `json:"goal_version"`
+	Inputs      Manifest `json:"inputs"`
+	Constraints []string `json:"constraints"`
+	Acceptance  []string `json:"acceptance"`
+	Approach    string   `json:"approach,omitempty"`
+	RunID       string   `json:"run_id"`
+	Started     string   `json:"started"`
+	Deadline    string   `json:"deadline"`
+	CallLimit   int      `json:"call_limit"`
+	Calls       int      `json:"calls"`
+}
+type DelegationResult struct {
+	Status    string   `json:"status"`
+	Reason    string   `json:"reason"`
+	Summary   string   `json:"summary,omitempty"`
+	Evidence  []string `json:"evidence,omitempty"`
+	Artifacts Manifest `json:"artifacts,omitempty"`
+	Todo      []string `json:"todo,omitempty"`
+}
+
+// ActionFact is recorded by the executor, separate from model plans or claims.
+type ActionFact struct {
+	Disposition   string   `json:"disposition"`
+	Inputs        Manifest `json:"inputs,omitempty"`
+	Outputs       Manifest `json:"outputs,omitempty"`
+	Deleted       []string `json:"deleted,omitempty"`
+	ErrorClass    string   `json:"error_class,omitempty"`
+	ErrorCode     string   `json:"error_code,omitempty"`
+	Conditions    string   `json:"conditions,omitempty"`
+	Reports       []string `json:"reports,omitempty"`
+	Recovery      string   `json:"recovery,omitempty"`
+	ResolvedBy    string   `json:"resolved_by,omitempty"`
+	Deterministic bool     `json:"deterministic,omitempty"`
+	ActionKey     string   `json:"action_key,omitempty"`
+	Fingerprint   string   `json:"fingerprint,omitempty"`
+}
+
+type ExecutionObservation struct {
+	Subgoal     string            `json:"subgoal"`
+	GoalVersion int               `json:"goal_version"`
+	Failures    map[string]int    `json:"failures,omitempty"`
+	Actions     map[string]string `json:"actions,omitempty"`
+	Evidence    []string          `json:"evidence,omitempty"`
+	StopRun     string            `json:"stop_run,omitempty"`
+	Replans     int               `json:"replans"`
+	Reason      string            `json:"reason,omitempty"`
+	Verified    map[string]bool   `json:"verified,omitempty"`
+}
+
+// WorkingMaterial survives history projection and belongs to a specific frame.
+// Resource/version identify the evidence; missing old fields never imply verification.
+type WorkingMaterial struct {
+	Segment  string `json:"segment,omitempty"`
+	Resource string `json:"resource"`
+	Version  string `json:"version"`
+	Source   string `json:"source"`
+	Content  string `json:"content,omitempty"`
+	Reason   string `json:"reason"`
+	Recovery string `json:"recovery,omitempty"`
 }
 
 // ContextSummary projects a closed prefix of the frame's immutable model history.
@@ -152,13 +256,14 @@ type DialogueSummaryItem struct {
 	Sources []string `json:"sources"`
 }
 type Step struct {
-	ID       string `json:"id"`
-	FrameID  string `json:"frame_id"`
-	Role     string `json:"role"`
-	Tool     string `json:"tool"`
-	ArgsHash string `json:"args_hash"`
-	Result   string `json:"result"`
-	At       string `json:"at"`
+	ID       string      `json:"id"`
+	FrameID  string      `json:"frame_id"`
+	Role     string      `json:"role"`
+	Tool     string      `json:"tool"`
+	ArgsHash string      `json:"args_hash"`
+	Result   string      `json:"result"`
+	At       string      `json:"at"`
+	Fact     *ActionFact `json:"fact,omitempty"`
 }
 type Checkpoint struct {
 	ID       string   `json:"id"`
@@ -182,42 +287,55 @@ type Run struct {
 	Error         string         `json:"error,omitempty"`
 }
 type Task struct {
-	ID                  string            `json:"id"`
-	Goal                string            `json:"goal"`
-	Mode                string            `json:"mode"`
-	Status              string            `json:"status"`
-	Base                Manifest          `json:"base"`
-	Frames              map[string]*Frame `json:"frames"`
-	Root                string            `json:"root"`
-	Steps               map[string]Step   `json:"steps"`
-	Checkpoints         []Checkpoint      `json:"checkpoints"`
-	Plan                *Plan             `json:"plan,omitempty"`
-	Question            *Question         `json:"question,omitempty"`
-	RunIDs              []string          `json:"run_ids"`
-	InstructionMessages []string          `json:"instruction_messages,omitempty"`
-	RunnerAction        *RunnerAction     `json:"runner_action,omitempty"`
+	ID                  string                           `json:"id"`
+	Goal                string                           `json:"goal"`
+	Mode                string                           `json:"mode"`
+	Status              string                           `json:"status"`
+	Base                Manifest                         `json:"base"`
+	Frames              map[string]*Frame                `json:"frames"`
+	Root                string                           `json:"root"`
+	Steps               map[string]Step                  `json:"steps"`
+	Dispositions        map[string]Step                  `json:"dispositions,omitempty"`
+	Checkpoints         []Checkpoint                     `json:"checkpoints"`
+	Plan                *Plan                            `json:"plan,omitempty"`
+	Question            *Question                        `json:"question,omitempty"`
+	RunIDs              []string                         `json:"run_ids"`
+	InstructionMessages []string                         `json:"instruction_messages,omitempty"`
+	RunnerAction        *RunnerAction                    `json:"runner_action,omitempty"`
+	Observations        map[string]*ExecutionObservation `json:"observations,omitempty"`
+	LastHandoff         *DelegationResult                `json:"last_handoff,omitempty"`
 }
 
 // RunnerAction identifies the one runner tool that may still have an external job.
 type RunnerAction struct {
-	FrameID            string `json:"frame_id"`
-	CallID             string `json:"call_id"`
-	JobID              string `json:"job_id"`
-	InstructionVersion int    `json:"instruction_version,omitempty"`
+	FrameID            string   `json:"frame_id"`
+	CallID             string   `json:"call_id"`
+	JobID              string   `json:"job_id"`
+	InstructionVersion int      `json:"instruction_version,omitempty"`
+	Inputs             Manifest `json:"inputs,omitempty"`
+	RunID              string   `json:"run_id,omitempty"`
+	Epoch              int64    `json:"epoch,omitempty"`
+	PlanRevision       string   `json:"plan_revision,omitempty"`
+	Call               *Call    `json:"call,omitempty"`
+	LastLookupRun      string   `json:"last_lookup_run,omitempty"`
+	Unknown            bool     `json:"unknown,omitempty"`
 }
 type Check struct {
-	Name   string `json:"name"`
-	Status string `json:"status"`
-	Detail string `json:"detail"`
+	Name        string   `json:"name"`
+	Status      string   `json:"status"`
+	Detail      string   `json:"detail"`
+	Requirement string   `json:"requirement,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
 }
 type Report struct {
-	ID      string          `json:"id"`
-	Kind    string          `json:"kind"`
-	Digest  string          `json:"digest"`
-	At      string          `json:"at"`
-	Status  string          `json:"status"`
-	Checks  []Check         `json:"checks"`
-	Details json.RawMessage `json:"details,omitempty"`
+	ID       string          `json:"id"`
+	Kind     string          `json:"kind"`
+	Digest   string          `json:"digest"`
+	At       string          `json:"at"`
+	Status   string          `json:"status"`
+	Checks   []Check         `json:"checks"`
+	Details  json.RawMessage `json:"details,omitempty"`
+	Evidence *ReportEvidence `json:"evidence,omitempty"`
 }
 type Version struct {
 	PreviewReady bool     `json:"preview_ready,omitempty"`
@@ -281,7 +399,7 @@ func (p *Project) Fence(run string, epoch int64) error {
 func (p *Project) Public() any {
 	tasks := []map[string]any{}
 	for _, t := range p.Tasks {
-		tasks = append(tasks, map[string]any{"id": t.ID, "goal": t.Goal, "mode": t.Mode, "status": t.Status, "plan": t.Plan, "question": t.Question, "checkpoints": len(t.Checkpoints), "run_ids": t.RunIDs})
+		tasks = append(tasks, map[string]any{"id": t.ID, "goal": t.Goal, "mode": t.Mode, "status": t.Status, "plan": t.Plan, "question": t.Question, "checkpoints": len(t.Checkpoints), "run_ids": t.RunIDs, "last_handoff": t.LastHandoff})
 	}
 	runs := []map[string]any{}
 	for _, r := range p.Runs {

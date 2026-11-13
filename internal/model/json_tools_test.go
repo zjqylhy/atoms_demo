@@ -1,8 +1,10 @@
 package model
 
 import (
+	"errors"
 	"mockatoms/internal/config"
 	"mockatoms/internal/core"
+	"mockatoms/internal/validation"
 	"strings"
 	"testing"
 )
@@ -34,6 +36,47 @@ func TestJSONToolAdaptation(t *testing.T) {
 	}
 }
 
+func TestJSONEnvelopeReportsAllShapeFailures(t *testing.T) {
+	tools := []Tool{{Name: "inspect", Parameters: map[string]any{"type": "object"}}}
+	for _, test := range []struct{ input, path, code string }{
+		{`null`, "$", "type"},
+		{`{"content":42,"calls":[]}`, "$.content", "type"},
+		{`{"calls":{}}`, "$.calls", "type"},
+		{`{"calls":[{}]}`, "$.calls[0].name", "required"},
+		{`{"calls":[{"name":"inspect"}]}`, "$.calls[0].arguments", "required"},
+		{`{"calls":[{"name":3,"arguments":{}}]}`, "$.calls[0].name", "type"},
+		{`{"calls":[{"name":"unavailable","arguments":{}}]}`, "$.calls[0].name", "enum"},
+		{`{"calls":[{"name":"inspect","arguments":null}]}`, "$.calls[0].arguments", "type"},
+		{`{"calls":[{"name":"inspect","arguments":[]}]}`, "$.calls[0].arguments", "type"},
+		{`{"calls":[{},{}]}`, "$.calls", "max_items"},
+	} {
+		t.Run(test.input, func(t *testing.T) {
+			message, err := parseJSONAction(test.input, tools)
+			var detail *validation.Error
+			if len(message.ToolCalls) != 0 || !errors.As(err, &detail) {
+				t.Fatal("failure lost structured feedback or returned an action", message, err)
+			}
+			found := false
+			for _, issue := range detail.Issues {
+				found = found || issue.Path == test.path && issue.Code == test.code && issue.Actual != "" && issue.Expected != "" && issue.Hint != ""
+			}
+			if !found {
+				t.Fatal("missing precise repair issue", err)
+			}
+		})
+	}
+	_, err := parseJSONAction(`{"calls":[{}]}`, tools)
+	if !strings.Contains(err.Error(), "$.calls[0].name") || !strings.Contains(err.Error(), "$.calls[0].arguments") || !strings.Contains(err.Error(), "允许值：inspect") {
+		t.Fatal("missing name and arguments must be reported together", err)
+	}
+	// Arguments remain raw and are not business-validated by the protocol.
+	text := `{"calls":[{"name":"inspect","arguments":{"large":9007199254740993}}]}`
+	message, err := parseJSONAction(text, tools)
+	if err != nil || message.ToolCalls[0].Function.Arguments != `{"large":9007199254740993}` {
+		t.Fatal("protocol changed or interpreted business arguments", message, err)
+	}
+}
+
 func TestJSONActionRejectsTrailingContent(t *testing.T) {
 	tools := []Tool{{Name: "read_file"}}
 	action := `{"content":"","calls":[{"name":"read_file","arguments":{"path":"notes.md"}}]}`
@@ -48,48 +91,37 @@ func TestJSONActionRejectsTrailingContent(t *testing.T) {
 	}
 }
 
-func TestJSONHistoryKeepsEvidenceWithoutRepeatingFileBodies(t *testing.T) {
-	c := New(config.Config{Model: "chat", ToolMode: "json"})
-	body := strings.Repeat("large-file-body", 1000)
-	messages := []core.ModelMessage{
-		{Role: "system", Content: "system"},
-		{Role: "assistant", Content: body, InvalidAction: true},
-		{Role: "assistant", ToolCalls: []core.Call{{ID: "saved", Type: "function", Function: core.Function{Name: "write_file", Arguments: core.JSON(map[string]any{"path": "app.js", "content": body})}}}},
-		{Role: "tool", ToolCallID: "saved", Content: `{"ok":true}`},
-	}
-	wire := core.JSON(c.jsonPayload(messages, nil, len(messages)))
-	if strings.Contains(wire, body) || !strings.Contains(wire, core.Hash([]byte(body))) || !strings.Contains(wire, "saved") {
-		t.Fatal("history evidence/size regression")
-	}
-	projected := c.jsonPayload(messages, nil, len(messages)).(map[string]any)["messages"].([]map[string]string)
-	if projected[2]["role"] != "user" || strings.Contains(projected[2]["content"], `"arguments"`) || strings.Contains(wire, "historical_content_note") {
-		t.Fatal("compression metadata presented as executable tool arguments")
-	}
-	if messages[1].Content != body || !strings.Contains(messages[2].ToolCalls[0].Function.Arguments, body) {
-		t.Fatal("stored history mutated")
+func TestJSONEncoderPreservesSelectedEvidence(t *testing.T) {
+	c := New(config.Config{ToolMode: "json"})
+	body := strings.Repeat("old-content", 1000)
+	messages := []core.ModelMessage{{Role: "system", Content: "system"},
+		{Role: "tool", ToolCallID: "read", Content: core.JSON(map[string]any{"result": map[string]any{"content": body}})},
+		{Role: "assistant", Content: "INVALID_BODY", InvalidAction: true},
+		{Role: "user", Content: "format feedback"}}
+	for _, boundary := range []int{0, len(messages)} {
+		wire := core.JSON(c.jsonPayload(messages, nil, boundary))
+		if !strings.Contains(wire, body) || strings.Contains(wire, "INVALID_BODY") {
+			t.Fatal("encoder changed selected evidence")
+		}
 	}
 }
 
-func TestOldReadBodyIsCompactedButLatestReadRemainsExact(t *testing.T) {
-	c := New(config.Config{ToolMode: "json"})
-	oldBody := strings.Repeat("old-content", 1000)
-	latest := "最新文件正文，不能改动"
-	messages := []core.ModelMessage{
-		{Role: "system", Content: "system"},
-		{Role: "tool", ToolCallID: "old", Content: core.JSON(map[string]any{"ok": true, "result": map[string]any{"path": "a.js", "content": oldBody}})},
-		{Role: "assistant", Content: "读取当前内容"},
-		{Role: "tool", ToolCallID: "new", Content: core.JSON(map[string]any{"ok": true, "result": map[string]any{"path": "a.js", "content": latest}})},
-	}
-	wire := core.JSON(c.jsonPayload(messages, nil, len(messages)))
-	if strings.Contains(wire, oldBody) || !strings.Contains(wire, latest) || !strings.Contains(wire, core.Hash([]byte(oldBody))) {
-		t.Fatal("historical reads grew or latest body lost")
-	}
-	if !strings.Contains(messages[1].Content, oldBody) {
-		t.Fatal("persisted history changed")
-	}
-	shortBody := "已确认的简短需求，不应在格式修正时被省略"
-	messages[1].Content = core.JSON(map[string]any{"result": map[string]any{"content": shortBody}})
-	if wire := core.JSON(c.jsonPayload(messages, nil, len(messages))); !strings.Contains(wire, shortBody) {
-		t.Fatal("short requirements lost in history")
+func TestJSONEnvelopeFeedbackLocatesMisplacedToolArguments(t *testing.T) {
+	for _, name := range []string{"assign_step", "renamed_action"} {
+		tools := []Tool{{Name: name, Parameters: map[string]any{"type": "object", "properties": map[string]any{"role": map[string]any{"type": "string"}, "goal": map[string]any{"type": "string"}}}}}
+		bad := `{"content":"delegate","calls":[{"name":"` + name + `","role":"Alex","goal":"check the saved input"}]}`
+		message, err := parseJSONAction(bad, tools)
+		if err == nil || len(message.ToolCalls) != 0 {
+			t.Fatal("invalid argument nesting was executed", message, err)
+		}
+		for _, want := range []string{"$.calls[0].role", "$.calls[0].arguments.role", "$.calls[0].arguments [required]", "允许字段：arguments, name", `"name":"` + name + `"`, `"arguments":{}`} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("repair feedback omitted %q: %v", want, err)
+			}
+		}
+		correct := `{"content":"delegate","calls":[{"name":"` + name + `","arguments":{"role":"Alex","goal":"check the saved input"}}]}`
+		if fixed, err := parseJSONAction(correct, tools); err != nil || len(fixed.ToolCalls) != 1 {
+			t.Fatal("corrected nesting rejected", fixed, err)
+		}
 	}
 }

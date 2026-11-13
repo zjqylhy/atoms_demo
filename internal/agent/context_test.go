@@ -47,7 +47,7 @@ func contextStep(task *core.Task, frame *core.Frame, n int, name, result string)
 
 func measuredFrame(t *testing.T, client *model.Client, p *core.Project, task *core.Task, f *core.Frame, tools []model.Tool) int {
 	t.Helper()
-	messages := append([]core.ModelMessage{{Role: "system", Content: instructions(f.Role, p, task)}}, f.Messages...)
+	messages := fullFrameContext(p, task, f)
 	r, err := client.PrepareRequest(messages, tools, len(messages))
 	if err != nil {
 		t.Fatal(err)

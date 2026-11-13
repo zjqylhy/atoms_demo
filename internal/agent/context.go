@@ -25,20 +25,12 @@ type preparedContext struct {
 // Prepare against the serialized request, then keep the same bytes for admission and transport.
 func prepareFrameContext(client *model.Client, p *core.Project, task *core.Task, frame *core.Frame, tools []model.Tool) (preparedContext, error) {
 	system := core.ModelMessage{Role: "system", Content: instructions(frame.Role, p, task)}
-	if client.Config.ToolMode != "json" {
-		full := fullFrameContext(p, task, frame)
-		request, err := client.PrepareRequest(full, tools, len(full))
-		if err == nil {
-			err = client.ValidateRequest(request)
-		}
-		return preparedContext{request: request}, err
-	}
-
 	summary := frame.Context
 	if summary != nil && (summary.Through < 1 || summary.Through > len(frame.Messages)) {
 		summary = nil
 	}
 	history := newContextHistory(system, frame.Messages, taskRequirements(p, task))
+	history.materials = materialMessages(p, frame)
 	encode := func(summary *core.ContextSummary) (model.PreparedRequest, error) {
 		messages, completeFrom := history.project(summary, frame.Dialogue)
 		return client.PrepareRequest(messages, tools, completeFrom)
@@ -117,10 +109,9 @@ type contextRequirement struct {
 }
 
 func fullFrameContext(p *core.Project, task *core.Task, frame *core.Frame) []core.ModelMessage {
-	messages := append([]core.ModelMessage{{Role: "system", Content: instructions(frame.Role, p, task)}}, frame.Messages...)
-	if len(task.InstructionMessages) != 0 {
-		messages = append(messages, requirementMessage(taskRequirements(p, task)))
-	}
+	h := newContextHistory(core.ModelMessage{Role: "system", Content: instructions(frame.Role, p, task)}, frame.Messages, taskRequirements(p, task))
+	h.materials = materialMessages(p, frame)
+	messages, _ := h.project(nil, nil)
 	return messages
 }
 
@@ -147,7 +138,7 @@ func taskRequirements(p *core.Project, task *core.Task) []contextRequirement {
 			out = append(out, contextRequirement{Source: fmt.Sprintf("user:%d", index), Kind: instructionKind, Text: m.Text})
 			continue
 		}
-		if m.At < started || m.Role != "user" || (m.Kind != "answer" && m.Kind != "plan_feedback") {
+		if m.At < started || m.Role != "user" || (m.Kind != "answer" && m.Kind != "plan_feedback" && m.Kind != "approval") {
 			continue
 		}
 		for eventIndex < len(p.Events) && p.Events[eventIndex].At <= m.At {
@@ -167,12 +158,13 @@ func taskRequirements(p *core.Project, task *core.Task) []contextRequirement {
 }
 
 type historicalStep struct {
-	ID     string `json:"step_id"`
-	Tool   string `json:"tool"`
-	Path   string `json:"path,omitempty"`
-	Status string `json:"status"`
-	Report string `json:"report_id,omitempty"`
-	Detail string `json:"detail,omitempty"`
+	ID      string        `json:"step_id"`
+	Tool    string        `json:"tool"`
+	Status  string        `json:"status"`
+	Inputs  core.Manifest `json:"inputs,omitempty"`
+	Outputs core.Manifest `json:"outputs,omitempty"`
+	Reports []string      `json:"report_ids,omitempty"`
+	Detail  string        `json:"detail,omitempty"`
 }
 
 func summarizeFrame(task *core.Task, frame *core.Frame, cut int) *core.ContextSummary {
@@ -192,33 +184,21 @@ func summarizeFrame(task *core.Task, frame *core.Frame, cut int) *core.ContextSu
 				Result json.RawMessage `json:"result"`
 			}
 			_ = json.Unmarshal([]byte(step.Result), &result)
-			if result.OK != nil && *result.OK && (step.Tool == "read_file" || step.Tool == "search_files" || step.Tool == "list_files") {
-				continue
-			}
 			entry := historicalStep{ID: step.ID, Tool: step.Tool, Status: "已记录工具结果"}
-			var args struct {
-				Path string `json:"path"`
-			}
-			if json.Unmarshal([]byte(call.Function.Arguments), &args) == nil {
-				entry.Path = excerpt(args.Path, 240)
-			}
-			if result.OK != nil && !*result.OK {
-				entry.Status, entry.Detail = "失败", excerpt(result.Error, 240)
-			}
-			var evidence struct {
-				ID      string `json:"id"`
-				Status  string `json:"status"`
-				Summary string `json:"summary"`
-			}
-			if json.Unmarshal(result.Result, &evidence) == nil {
-				switch step.Tool {
-				case "check_artifacts", "run_project", "test_preview":
-					entry.Report = evidence.ID
-					entry.Status = "历史检查：" + excerpt(evidence.Status, 32)
-				case "assign_step":
-					entry.Detail = excerpt(evidence.Summary, 240)
+			if fact := step.Fact; fact != nil {
+				entry.Inputs, entry.Outputs, entry.Reports = fact.Inputs, fact.Outputs, fact.Reports
+				entry.Status = fact.Disposition
+			} else if adapter := toolProtocols[step.Tool]; adapter.inputs != nil {
+				var args map[string]any
+				if json.Unmarshal([]byte(call.Function.Arguments), &args) == nil {
+					entry.Inputs = adapter.inputs(&core.Project{Files: core.Manifest{}}, args)
 				}
 			}
+			if result.OK != nil && !*result.OK {
+				entry.Status = "失败"
+				entry.Detail = excerpt(result.Error, 240)
+			}
+
 			if len(details) == keepEvidence {
 				copy(details, details[1:])
 				details = details[:keepEvidence-1]

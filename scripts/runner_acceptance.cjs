@@ -59,9 +59,17 @@ async function lookup(id, auth = token) {
 async function run(name, j, want) {
   const start = Date.now();
   const r = await post(j);
-  if (name === "infinite-loop-terminated") assert.ok(Date.now() - start < 35000, "script deadline was not enforced");
+  if (name === "infinite-loop-terminated")
+    assert.ok(Date.now() - start < 35000, "script deadline was not enforced");
   assert.equal(r.status, 200, JSON.stringify(r));
-  assert.equal(r.body.status, want, JSON.stringify({...r.body, details:{...r.body.details, preview_html:undefined}}));
+  assert.equal(
+    r.body.status,
+    want,
+    JSON.stringify({
+      ...r.body,
+      details: { ...r.body.details, preview_html: undefined },
+    }),
+  );
   results.push({
     name,
     status: r.body.status,
@@ -82,20 +90,58 @@ async function run(name, j, want) {
       await new Promise((r) => setTimeout(r, 500));
     }
     if (process.env.ATOMS_ACCEPTANCE_GO_FIXTURE) {
-      const files = JSON.parse(await fs.readFile(process.env.ATOMS_ACCEPTANCE_GO_FIXTURE, "utf8"));
-      await run("generated-go-build-and-test", job(files, "run_project", { kind: "go", entry: "go.mod" }), "passed");
+      const files = JSON.parse(
+        await fs.readFile(process.env.ATOMS_ACCEPTANCE_GO_FIXTURE, "utf8"),
+      );
+      await run(
+        "generated-go-build-and-test",
+        job(files, "run_project", { kind: "go", entry: "go.mod" }),
+        "passed",
+      );
       await fs.mkdir("artifacts", { recursive: true });
-      await fs.writeFile("artifacts/runner-go-fixture.json", JSON.stringify({
-        at: new Date().toISOString(), runtime, source_digest: digest(files), results,
-      }, null, 2));
+      await fs.writeFile(
+        "artifacts/runner-go-fixture.json",
+        JSON.stringify(
+          {
+            at: new Date().toISOString(),
+            runtime,
+            source_digest: digest(files),
+            results,
+          },
+          null,
+          2,
+        ),
+      );
       return;
     }
     if (process.env.ATOMS_ACCEPTANCE_FIXTURE) {
-      const fixture = JSON.parse(await fs.readFile(process.env.ATOMS_ACCEPTANCE_FIXTURE, "utf8"));
-      await run("generated-page-build", job(fixture.files, "run_project", {kind:"web",entry:"index.html"}), "passed");
-      await run("generated-page-interactions", job(fixture.files, "test_preview", {steps:fixture.steps}), "passed");
-      await fs.mkdir("artifacts", {recursive:true});
-      await fs.writeFile("artifacts/runner-fixture.json", JSON.stringify({at:new Date().toISOString(),runtime,source_digest:digest(fixture.files),results},null,2));
+      const fixture = JSON.parse(
+        await fs.readFile(process.env.ATOMS_ACCEPTANCE_FIXTURE, "utf8"),
+      );
+      await run(
+        "generated-page-build",
+        job(fixture.files, "run_project", { kind: "web", entry: "index.html" }),
+        "passed",
+      );
+      await run(
+        "generated-page-interactions",
+        job(fixture.files, "test_preview", { steps: fixture.steps }),
+        "passed",
+      );
+      await fs.mkdir("artifacts", { recursive: true });
+      await fs.writeFile(
+        "artifacts/runner-fixture.json",
+        JSON.stringify(
+          {
+            at: new Date().toISOString(),
+            runtime,
+            source_digest: digest(fixture.files),
+            results,
+          },
+          null,
+          2,
+        ),
+      );
       console.log("Generated-page acceptance passed.");
       return;
     }
@@ -128,37 +174,142 @@ async function run(name, j, want) {
     );
     await run(
       "python-output",
-      job({
-        "tools/sum.py": "from pathlib import Path\nfrom helper import add\nn = int((Path(__file__).parent / 'n.txt').read_text())\nprint(add(n, 3))",
-        "tools/helper.py": "def add(a, b):\n    return a + b",
-        "tools/n.txt": "7",
-      }, "run_project", { kind: "script", entry: "tools/sum.py", expected_stdout: "10" }),
+      job(
+        {
+          "tools/sum.py":
+            "from pathlib import Path\nfrom helper import add\nn = int((Path(__file__).parent / 'n.txt').read_text())\nprint(add(n, 3))",
+          "tools/helper.py": "def add(a, b):\n    return a + b",
+          "tools/n.txt": "7",
+        },
+        "run_project",
+        { kind: "script", entry: "tools/sum.py", expected_stdout: "10" },
+      ),
       "passed",
+    );
+    const binaryJob = job(
+      {
+        "build.py":
+          "from pathlib import Path\nPath('result.bin').write_bytes(bytes([0,255,128,13,10,7]))\nprint('generated')",
+      },
+      "run_project",
+      {
+        kind: "script",
+        entry: "build.py",
+        expected_stdout: "generated",
+        outputs: [{ path: "result.bin", format: "binary", old_hash: "" }],
+      },
+    );
+    const binaryResult = await run(
+      "declared-binary-output",
+      binaryJob,
+      "passed",
+    );
+    assert.deepEqual(
+      Buffer.from(binaryResult.body.artifacts[0].data_base64, "base64"),
+      Buffer.from([0, 255, 128, 13, 10, 7]),
+    );
+    assert.equal(
+      binaryResult.body.artifacts[0].sha256,
+      crypto
+        .createHash("sha256")
+        .update(Buffer.from([0, 255, 128, 13, 10, 7]))
+        .digest("hex"),
+    );
+    assert.deepEqual((await post(binaryJob)).body, binaryResult.body);
+    const failedOutput = await run(
+      "partial-output-not-collected",
+      {
+        ...binaryJob,
+        id: crypto.randomBytes(32).toString("hex"),
+        parameters: {
+          ...binaryJob.parameters,
+          outputs: [
+            ...binaryJob.parameters.outputs,
+            { path: "missing.bin", format: "binary", old_hash: "" },
+          ],
+        },
+      },
+      "failed",
+    );
+    assert.deepEqual(failedOutput.body.artifacts, []);
+    const linkedJob = job(
+      {
+        "build.py":
+          "import os\nos.symlink('/etc/passwd','escape.bin')\nprint('generated')",
+      },
+      "run_project",
+      {
+        kind: "script",
+        entry: "build.py",
+        expected_stdout: "generated",
+        outputs: [{ path: "escape.bin", format: "binary", old_hash: "" }],
+      },
+    );
+    await run("symlink-output-rejected", linkedJob, "failed");
+    const copiedInput = job(
+      {
+        "copy.py":
+          "from pathlib import Path\nPath('copy.bin').write_bytes((Path(__file__).parent/'input.bin').read_bytes())\nprint('copied')",
+      },
+      "run_project",
+      {
+        kind: "script",
+        entry: "copy.py",
+        expected_stdout: "copied",
+        outputs: [{ path: "copy.bin", format: "binary", old_hash: "" }],
+      },
+    );
+    copiedInput.binary_files = {
+      "input.bin": Buffer.from([0, 255, 128]).toString("base64"),
+    };
+    const copied = await run("binary-input-round-trip", copiedInput, "passed");
+    assert.deepEqual(
+      Buffer.from(copied.body.artifacts[0].data_base64, "base64"),
+      Buffer.from([0, 255, 128]),
     );
     await run(
       "typescript-output",
-      job({
-        "tools/main.ts": "import { add } from './helper'; console.log(add(7, 3));",
-        "tools/helper.ts": "export function add(a: number, b: number): number { return a + b; }",
-      }, "run_project", { kind: "script", entry: "tools/main.ts", expected_stdout: "10" }),
+      job(
+        {
+          "tools/main.ts":
+            "import { add } from './helper'; console.log(add(7, 3));",
+          "tools/helper.ts":
+            "export function add(a: number, b: number): number { return a + b; }",
+        },
+        "run_project",
+        { kind: "script", entry: "tools/main.ts", expected_stdout: "10" },
+      ),
       "passed",
     );
     const go = await run(
       "go-build-and-test",
-      job({
-        "go.mod": "module example.test/sample\n\ngo 1.21\n",
-        "main.go": "package main\n\nfunc sum(a, b int) int { return a+b }\nfunc main() {}\n",
-        "main_test.go": 'package main\nimport "testing"\nfunc TestSum(t *testing.T) { if sum(7, 3) != 10 { t.Fatal("sum") } }\n',
-      }, "run_project", { kind: "go", entry: "go.mod" }),
+      job(
+        {
+          "go.mod": "module example.test/sample\n\ngo 1.21\n",
+          "main.go":
+            "package main\n\nfunc sum(a, b int) int { return a+b }\nfunc main() {}\n",
+          "main_test.go":
+            'package main\nimport "testing"\nfunc TestSum(t *testing.T) { if sum(7, 3) != 10 { t.Fatal("sum") } }\n',
+        },
+        "run_project",
+        { kind: "go", entry: "go.mod" },
+      ),
       "passed",
     );
-    assert.deepEqual(go.body.checks.map(({ name }) => name), ["go_build", "go_test"]);
+    assert.deepEqual(
+      go.body.checks.map(({ name }) => name),
+      ["go_build", "go_test"],
+    );
     const brokenGo = await run(
       "go-build-failure-is-artifact-failure",
-      job({
-        "go.mod": "module example.test/sample\n\ngo 1.21\n",
-        "main.go": "package main\nfunc main() { missingSymbol() }\n",
-      }, "run_project", { kind: "go", entry: "go.mod" }),
+      job(
+        {
+          "go.mod": "module example.test/sample\n\ngo 1.21\n",
+          "main.go": "package main\nfunc main() { missingSymbol() }\n",
+        },
+        "run_project",
+        { kind: "go", entry: "go.mod" },
+      ),
       "failed",
     );
     assert.equal(brokenGo.body.checks[0].name, "go_build");
@@ -175,7 +326,7 @@ async function run(name, j, want) {
       job(page, "run_project", { kind: "web", entry: "index.html" }),
       "passed",
     );
-    await run(
+    const interaction = await run(
       "desktop-mobile-interaction",
       job(page, "test_preview", {
         steps: [
@@ -189,6 +340,16 @@ async function run(name, j, want) {
         ],
       }),
       "passed",
+    );
+    const contentChecks = interaction.body.checks.filter(
+      (item) => item.requirement === "计数从 0 变为 1",
+    );
+    assert.equal(contentChecks.length, 2);
+    assert.ok(contentChecks.every((item) => item.paths.includes("index.html")));
+    assert.ok(
+      !interaction.body.checks.some(
+        (item) => item.requirement === "点击增加计数",
+      ),
     );
     await run(
       "broken-button-detected",
@@ -225,7 +386,9 @@ async function run(name, j, want) {
       "passed",
     );
     const loop = job({ "loop.js": "while(true){}" }, "run_project", {
-      kind: "script", entry: "loop.js", expected_stdout: "",
+      kind: "script",
+      entry: "loop.js",
+      expected_stdout: "",
     });
     const [report] = await Promise.all([
       run("infinite-loop-terminated", loop, "failed"),
@@ -243,29 +406,52 @@ async function run(name, j, want) {
       })(),
     ]);
     assert.deepEqual(await lookup(loop.id), report);
-    results.push({ name: "running-job-lookup-and-busy-response", status: "passed" });
+    results.push({
+      name: "running-job-lookup-and-busy-response",
+      status: "passed",
+    });
     assert.equal(
       (await post(job({ "../escape.js": "x" }, "run_project", {}))).status,
       400,
     );
     assert.equal((await post(js, "invalid")).status, 401);
     // Deliberately split a Chinese UTF-8 codepoint across HTTP chunks.
-    const chinese = job({"unicode.js": "console.log('中文保持完整')"}, "run_project", {kind:"script", entry:"unicode.js", expected_stdout:"中文保持完整"});
+    const chinese = job(
+      { "unicode.js": "console.log('中文保持完整')" },
+      "run_project",
+      { kind: "script", entry: "unicode.js", expected_stdout: "中文保持完整" },
+    );
     const bytes = Buffer.from(JSON.stringify(chinese));
     const cut = bytes.indexOf(Buffer.from("中")) + 1;
     const unicodeResult = await new Promise((resolve, reject) => {
-      const request = http.request(base + "/jobs", {method:"POST", headers:{Authorization:"Bearer " + token, "Content-Type":"application/json"}}, response => {
-        response.setEncoding("utf8");
-        let body = "";
-        response.on("data", chunk => body += chunk);
-        response.on("end", () => { try { resolve(JSON.parse(body)); } catch (e) { reject(e); } });
-      });
+      const request = http.request(
+        base + "/jobs",
+        {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer " + token,
+            "Content-Type": "application/json",
+          },
+        },
+        (response) => {
+          response.setEncoding("utf8");
+          let body = "";
+          response.on("data", (chunk) => (body += chunk));
+          response.on("end", () => {
+            try {
+              resolve(JSON.parse(body));
+            } catch (e) {
+              reject(e);
+            }
+          });
+        },
+      );
       request.on("error", reject);
       request.write(bytes.subarray(0, cut));
       setTimeout(() => request.end(bytes.subarray(cut)), 20);
     });
     assert.equal(unicodeResult.status, "passed", JSON.stringify(unicodeResult));
-    results.push({name:"utf8-chunk-boundary", status:"passed"});
+    results.push({ name: "utf8-chunk-boundary", status: "passed" });
     results.push({ name: "path-and-auth-rejected", status: "passed" });
     await fs.mkdir("artifacts", { recursive: true });
     await fs.writeFile(

@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"mockatoms/internal/core"
 	"mockatoms/internal/model"
+	"mockatoms/internal/validation"
 	"path"
 	"sort"
 	"strings"
@@ -26,22 +27,22 @@ func def(name, desc string, fields map[string]any, required ...string) model.Too
 	if required == nil {
 		required = []string{}
 	}
-	return model.Tool{Name: name, Description: desc, Parameters: map[string]any{"type": "object", "properties": fields, "required": required, "additionalProperties": false}}
+	return model.Tool{Control: toolProtocols[name].control, Name: name, Description: desc, Parameters: map[string]any{"type": "object", "properties": fields, "required": required, "additionalProperties": false}}
 }
 func definitions(role string) []model.Tool {
 	all := []model.Tool{
 		def("list_files", "查看当前项目文件和内容摘要", map[string]any{}),
-		def("read_file", "读取项目文件，修改时使用返回的 hash", map[string]any{"path": prop("string", "相对路径")}, "path"),
+		def("read_file", "分行读取项目文件，修改时使用返回的 hash；截取时按 next_line 继续。超长单行用 offset/limit 按字节读取并按 next_offset 继续，不改写源文件", map[string]any{"path": prop("string", "相对路径"), "start_line": prop("integer", "起始行，默认 1"), "end_line": prop("integer", "结束行，默认到末尾；每次最多 16000 字节"), "offset": prop("integer", "可选 UTF-8 字节偏移，从 0 开始；不能与行范围混用"), "limit": prop("integer", "字节读取长度 4–16000，默认 16000，须同时指定 offset")}, "path"),
 		def("search_files", "在项目文本中搜索字面文本，最多返回 50 处", map[string]any{"query": prop("string", "搜索文本")}, "query"),
-		def("check_artifacts", "执行真实结构、语法及格式检查，结果不代替运行测试", map[string]any{}),
+		def("check_artifacts", "执行真实结构及内容断言；可指定 paths 检查生成前输入，最终交付须覆盖整个交付范围", map[string]any{"paths": listProp("string"), "assertions": assertionsProp()}),
 	}
-	writes := map[string]any{"path": prop("string", "相对路径"), "content": prop("string", "完整 UTF-8 文件内容"), "old_hash": prop("string", "已有文件的 hash；创建新文件填空字符串")}
+	writes := map[string]any{"path": prop("string", "相对路径"), "content": prop("string", "全部 UTF-8 内容，保存会完整替换文件；局部片段请使用局部编辑工具"), "old_hash": prop("string", "已有文件的 hash；创建新文件填空字符串")}
 	switch role {
 	case "Mike":
 		all = append(all,
 			def("ask_user", "提出必要问题并等待用户回答", map[string]any{"question": prop("string", "问题"), "options": listProp("string")}, "question"),
-			def("propose_plan", "保存计划及验收条件，Plan 模式会等待用户批准", map[string]any{"plan": prop("string", "Markdown 计划"), "acceptance": listProp("string")}, "plan", "acceptance"),
-			def("assign_step", "按需分派一个专家并回收工作结果；不能多层委派", map[string]any{"role": map[string]any{"type": "string", "enum": []string{"Emma", "Bob", "Alex", "David"}}, "goal": prop("string", "子目标、已确认限制、输入文件引用及验收要求")}, "role", "goal"),
+			def("propose_plan", "保存计划及验收条件，Plan 模式会等待用户批准", map[string]any{"plan": prop("string", "Markdown 计划"), "acceptance": listProp("string"), "delivery": deliveryProp()}, "plan", "acceptance"),
+			def("assign_step", "按需分派一个专家并回收工作结果；不能多层委派", map[string]any{"role": map[string]any{"type": "string", "enum": []string{"Emma", "Bob", "Alex", "David"}}, "goal": prop("string", "子目标、已有输入及有效用户限制"), "acceptance": listProp("string"), "approach": prop("string", "模型选择的技术路线，与用户约束分开；重规划需说明改变的条件")}, "role", "goal"),
 			def("finish_task", "申请完成：后端核验产物与真实报告，通过后才形成版本", map[string]any{"summary": prop("string", "交付内容、已验证项、未覆盖项"), "answer_only": prop("boolean", "仅普通解释问答且未修改产物时为 true")}, "summary", "answer_only"))
 	case "Emma":
 		all = append(all, def("ask_user", "询问缺少的关键信息", map[string]any{"question": prop("string", "问题"), "options": listProp("string")}, "question"), def("write_document", "保存 Markdown 或文本说明", writes, "path", "content", "old_hash"))
@@ -49,15 +50,18 @@ func definitions(role string) []model.Tool {
 		all = append(all, def("write_document", "保存技术设计 Markdown 或文本", writes, "path", "content", "old_hash"))
 	case "Alex":
 		all = append(all,
-			def("write_file", "保存代码或项目文件，拒绝覆盖意外变化", writes, "path", "content", "old_hash"),
+			def("write_file", "完整替换文件，必须提供全部内容；不得把片段当完整文件。局部修改或大文件分次修改用 replace_text，拒绝覆盖意外变化", writes, "path", "content", "old_hash"),
 			def("replace_text", "按旧摘要精确替换，匹配次数必须等于 expected_count", map[string]any{"path": prop("string", "文件路径"), "old_hash": prop("string", "文件当前摘要"), "old_text": prop("string", "待替换文字"), "new_text": prop("string", "新文字"), "expected_count": prop("integer", "预期匹配次数")}, "path", "old_hash", "old_text", "new_text", "expected_count"),
 			def("delete_file", "只从当前草稿中移除文件，保留历史", map[string]any{"path": prop("string", "路径"), "old_hash": prop("string", "文件当前摘要")}, "path", "old_hash"),
-			def("run_project", "在隔离环境真实构建网页、运行 JavaScript/TypeScript/Python 脚本或编译并测试 Go 模块。kind=go 时使用 go.mod；kind=script 必填 expected_stdout，工作目录为临时目录，项目文件按脚本位置解析", map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"web", "script", "go"}}, "entry": prop("string", "网页 index.html、脚本相对路径或根目录 go.mod"), "args": listProp("string"), "expected_stdout": prop("string", "kind=script 必填，去除首尾空白后精确比较；其他类型省略")}, "kind", "entry"),
-			def("test_preview", "隔离浏览器执行需求对应的交互断言；至少一个断言，禁止自定义 JS", map[string]any{"steps": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string", "enum": []string{"click", "fill", "select", "check", "expect_text", "expect_count", "expect_visible"}}, "selector": prop("string", "CSS 选择器"), "value": prop("string", "输入或期望文本"), "count": prop("integer", "期望数量"), "requirement": prop("string", "对应用户需求或计划验收项")}, "required": []string{"action", "selector", "requirement"}, "additionalProperties": false}}}, "steps"))
+			def("run_project", "在隔离环境真实构建网页、运行 JavaScript/TypeScript/Python 脚本或编译并测试 Go 模块。kind=go 时使用 go.mod；kind=script 必填 expected_stdout，输入目录 /workspace/project 只读，当前工作目录 /workspace/scratch 可写。输出用当前目录相对路径，不写源码目录；输入相对 __file__ 读取。生成文件必须用 outputs 声明回收；assertions 对回收字节做内容验收，stdout 不能代替内容验收", map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"web", "script", "go"}}, "entry": prop("string", "网页 index.html、脚本相对路径或根目录 go.mod"), "args": listProp("string"), "expected_stdout": prop("string", "kind=script 必填，去除首尾空白后精确比较；其他类型省略"), "outputs": outputsProp(), "assertions": assertionsProp()}, "kind", "entry"),
+			def("test_preview", "隔离浏览器执行需求对应的交互断言；至少一个断言，禁止自定义 JS", map[string]any{"steps": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{"action": map[string]any{"type": "string", "enum": []string{"click", "fill", "select", "check", "expect_text", "expect_count", "expect_visible"}}, "selector": prop("string", "CSS 选择器"), "value": prop("string", "输入或期望文本"), "count": prop("integer", "期望数量"), "requirement": prop("string", "对应用户需求或计划验收项"), "paths": listProp("string")}, "required": []string{"action", "selector", "requirement"}, "additionalProperties": false}}}, "steps"))
 	case "David":
 		all = append(all, def("write_document", "保存分析报告 Markdown", writes, "path", "content", "old_hash"),
 			def("analyze_table", "对用户原始 CSV/JSON 执行真实统计并保存结果 CSV；聚合结果固定列名 group,value，分别为分组和数值，可直接交付并生成图表，不要手工改写", map[string]any{"source": prop("string", "只读输入文件路径"), "group_by": prop("string", "分组字段，可为空"), "value": prop("string", "运算字段，count 可为空"), "operation": map[string]any{"type": "string", "enum": []string{"select", "count", "sum", "mean", "min", "max"}}, "output": prop("string", "结果 CSV 路径"), "filter_column": prop("string", "可选筛选字段"), "filter_value": prop("string", "等值筛选值"), "select_columns": listProp("string"), "sort_by": prop("string", "输出排序字段，聚合结果为 group 或 value"), "sort_order": map[string]any{"type": "string", "enum": []string{"asc", "desc"}}, "sort_numeric": prop("boolean", "select 模式是否按数值排序")}, "source", "group_by", "value", "operation", "output"),
 			def("create_chart", "引用真实分析结果生成柱状/折线图配置", map[string]any{"source": prop("string", "分析结果 CSV"), "output": prop("string", "输出 .chart.json 路径"), "kind": map[string]any{"type": "string", "enum": []string{"bar", "line"}}, "title": prop("string", "图表标题")}, "source", "output", "kind", "title"))
+	}
+	if role != "Mike" {
+		all = append(all, def("return_step", "携带事实交回主 Agent；子目标完成不等于整个任务已交付", map[string]any{"status": map[string]any{"type": "string", "enum": []string{"completed", "needs_replan", "blocked"}}, "reason": prop("string", "交回原因"), "summary": prop("string", "已完成工作与实际证据"), "todo": listProp("string")}, "status", "reason", "summary", "todo"))
 	}
 	return all
 }
@@ -76,61 +80,45 @@ func (b *boundTool) InvokableRun(ctx context.Context, raw string, _ ...tool.Opti
 	if compose.GetToolCallID(ctx) != b.call.ID {
 		return "", errors.New("工具调用关联错误")
 	}
-	var args map[string]any
-	failure := json.Unmarshal([]byte(raw), &args)
+	if p, _, _, err := b.e.load(b.s); err == nil {
+		task := p.Tasks[b.s.Task]
+		key := b.s.Frame + "/" + b.call.ID
+		_, executed := task.Steps[key]
+		disposition, closed := task.Dispositions[key]
+		closed = closed && disposition.Fact != nil && disposition.Fact.Disposition != "unknown"
+		if executed || closed {
+			return b.e.record(b.s, b.call, nil, func(*core.Project) (any, error) { return nil, nil })
+		}
+	}
+	value, failure := validation.Decode(raw, "$.arguments")
 	if failure == nil {
-		failure = validateArgs(args, b.def.Parameters)
+		failure = validation.Validate(value, b.def.Parameters, "$.arguments")
 	}
 	if failure != nil {
+		if p, _, _, err := b.e.load(b.s); err == nil {
+			fact := actionFact(p, b.s, b.call)
+			fact.Deterministic = true
+			fact.Conditions = "schema:" + core.Hash([]byte(core.JSON(b.def.Parameters)))
+			b.s.fact = &fact
+			if err := b.e.admitTool(b.s, b.call, fact); err != nil {
+				return "", err
+			}
+		}
 		return b.e.record(b.s, b.call, nil, func(*core.Project) (any, error) { return nil, failure })
+	}
+	args := value.(map[string]any)
+	p, _, _, err := b.e.load(b.s)
+	if err != nil {
+		return "", err
+	}
+	fact := actionFact(p, b.s, b.call)
+	b.s.fact = &fact
+	if err := b.e.admitTool(b.s, b.call, fact); err != nil {
+		return "", err
 	}
 	return b.e.execute(ctx, b.s, b.call, args)
 }
-func validateArgs(a map[string]any, s map[string]any) error {
-	props := s["properties"].(map[string]any)
-	for k, v := range a {
-		p, ok := props[k]
-		if !ok {
-			return fmt.Errorf("未知参数 %s", k)
-		}
-		spec := p.(map[string]any)
-		kind := spec["type"].(string)
-		valid := false
-		switch kind {
-		case "string":
-			_, valid = v.(string)
-		case "boolean":
-			_, valid = v.(bool)
-		case "integer":
-			n, ok := v.(float64)
-			valid = ok && n == float64(int64(n))
-		case "array":
-			_, valid = v.([]any)
-		case "object":
-			_, valid = v.(map[string]any)
-		}
-		if !valid {
-			return fmt.Errorf("参数 %s 类型无效", k)
-		}
-		if allowed, ok := spec["enum"].([]string); ok {
-			found := false
-			for _, item := range allowed {
-				if v == item {
-					found = true
-				}
-			}
-			if !found {
-				return fmt.Errorf("参数 %s 不在允许范围", k)
-			}
-		}
-	}
-	for _, k := range s["required"].([]string) {
-		if _, ok := a[k]; !ok {
-			return fmt.Errorf("缺少参数 %s", k)
-		}
-	}
-	return nil
-}
+
 func str(a map[string]any, k string) string { s, _ := a[k].(string); return s }
 func stringsArg(a map[string]any, k string) []string {
 	out := []string{}
@@ -206,38 +194,23 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 	}
 	switch c.Function.Name {
 	case "assign_step":
-		role := str(a, "role")
-		if !permitted(t) && role != "Emma" && role != "Bob" {
-			return fail(errors.New("批准前只能分派需求或设计规划"))
-		}
-		childID := s.Frame + "/" + c.ID
-		_, err = e.Store.Mutate(s.Owner, s.Project, nil, func(p *core.Project) error {
-			if err := s.checkInstruction(p); err != nil {
-				return err
-			}
-			task := p.Tasks[s.Task]
-			if task.Frames[childID] == nil {
-				packet := map[string]any{"goal": str(a, "goal"), "task_goal": task.Goal, "plan": task.Plan, "files": p.Files, "acceptance": "按用户要求与已批准范围执行；检查引用必须是真实工具结果"}
-				task.Frames[childID] = &core.Frame{ID: childID, Role: role, Goal: str(a, "goal"), Messages: []core.ModelMessage{{Role: "user", Content: core.JSON(packet)}}}
-				p.Event("handoff", "Mike", "交给 "+role+"："+str(a, "goal"), nil)
-			}
-			return nil
-		})
-		if err != nil {
-			return "", err
-		}
-		child := s
-		child.Frame = childID
-		result, err := e.runFrame(ctx, child)
-		redirected := errors.Is(err, errNewInstruction)
-		if err != nil && !redirected {
-			return "", err
-		}
+		return e.delegate(ctx, s, c, a, p)
+	case "return_step":
 		return e.record(s, c, nil, func(p *core.Project) (any, error) {
-			if redirected {
-				return redirectedDelegation(p, role), nil
+			frame := p.Tasks[s.Task].Frames[s.Frame]
+			outcome := &core.DelegationResult{Status: str(a, "status"), Reason: str(a, "reason"), Summary: str(a, "summary"), Todo: stringsArg(a, "todo"), Artifacts: core.Clone(p.Files)}
+			for key, step := range p.Tasks[s.Task].Steps {
+				if step.FrameID == s.Frame {
+					outcome.Evidence = append(outcome.Evidence, key)
+				}
 			}
-			return map[string]any{"role": role, "summary": result, "files": p.Files}, nil
+			sort.Strings(outcome.Evidence)
+			frame.Complete = true
+			frame.Outcome = outcome
+			frame.Result = core.JSON(outcome)
+			p.Tasks[s.Task].LastHandoff = outcome
+			p.Event("handoff", frame.Role, outcome.Reason, outcome)
+			return outcome, nil
 		})
 	case "list_files":
 		return e.record(s, c, nil, func(p *core.Project) (any, error) { return p.Files, nil })
@@ -246,12 +219,56 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 		if !ok {
 			return fail(errors.New("文件不存在"))
 		}
+		if file.Binary {
+			return fail(errors.New("此文件是二进制产物，请下载或用 check_artifacts 的内容断言检查，不能按文本读取"))
+		}
 		content, err := e.Store.Blob(s.Owner, file.Hash)
 		if err != nil {
 			return "", err
 		}
-		return e.record(s, c, nil, func(*core.Project) (any, error) {
-			return map[string]any{"path": str(a, "path"), "hash": file.Hash, "content": string(content)}, nil
+		if offset, ok := a["offset"].(float64); ok {
+			if a["start_line"] != nil || a["end_line"] != nil {
+				return fail(errors.New("字节范围与行范围不能混用"))
+			}
+			limit := 16000
+			if n, ok := a["limit"].(float64); ok {
+				limit = int(n)
+			}
+			body, next, err := fileBytes(string(content), int(offset), limit)
+			if err != nil {
+				return fail(err)
+			}
+			return e.record(s, c, nil, func(p *core.Project) (any, error) {
+				material := core.WorkingMaterial{Resource: "file:" + str(a, "path"), Version: file.Hash, Source: s.Frame + "/" + c.ID, Content: body,
+					Segment: fmt.Sprintf("bytes:%d-%d", int(offset), next), Reason: "当前子目标依赖的文件字节片段", Recovery: fmt.Sprintf("read_file(path=%q,offset=%d)，hash=%s", str(a, "path"), next, file.Hash)}
+				retainMaterial(p.Tasks[s.Task].Frames[s.Frame], material)
+				return map[string]any{"path": str(a, "path"), "hash": file.Hash, "content": body, "offset": int(offset), "next_offset": next, "complete": next == len(content)}, nil
+			})
+		}
+		if a["limit"] != nil {
+			return fail(errors.New("按字节读取时须同时指定 offset"))
+		}
+		start, end := 1, 0
+		if n, ok := a["start_line"].(float64); ok {
+			start = int(n)
+		}
+		if n, ok := a["end_line"].(float64); ok {
+			end = int(n)
+		}
+		if start < 1 || end < 0 || (end > 0 && end < start) {
+			return fail(errors.New("读取行范围无效"))
+		}
+		body, first, last, complete := fileSlice(string(content), start, end)
+		if last < first {
+			return fail(errors.New("范围为空或单行超过 16000 字节；超长单行请用 offset=0、limit=16000 分段读取，无需改写源文件"))
+		}
+		return e.record(s, c, nil, func(p *core.Project) (any, error) {
+			material := fileMaterial(str(a, "path"), file, body, s.Frame+"/"+c.ID)
+			material.Segment = fmt.Sprintf("%d-%d", first, last)
+			material.Reason = fmt.Sprintf("当前子目标依赖，第 %d–%d 行", first, last)
+			material.Recovery = fmt.Sprintf("read_file(path=%q,start_line=%d)，hash=%s", str(a, "path"), last+1, file.Hash)
+			retainMaterial(p.Tasks[s.Task].Frames[s.Frame], material)
+			return map[string]any{"path": str(a, "path"), "hash": file.Hash, "content": body, "start_line": first, "end_line": last, "complete": complete, "next_line": last + 1}, nil
 		})
 	case "search_files":
 		query := str(a, "query")
@@ -269,6 +286,9 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 		}
 		sort.Strings(names)
 		for _, n := range names {
+			if p.Files[n].Binary {
+				continue
+			}
 			for i, line := range strings.Split(files[n], "\n") {
 				if strings.Contains(line, query) && len(hits) < 50 {
 					if len(line) > 500 {
@@ -306,6 +326,7 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 			if err := write(p, name, content, str(a, "old_hash"), c.Function.Name == "write_document"); err != nil {
 				return nil, err
 			}
+			rememberFile(p, s, c, name, content)
 			return map[string]any{"path": name, "hash": hash, "saved": true}, nil
 		})
 	case "delete_file":
@@ -315,6 +336,13 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 				return nil, errors.New("文件不存在、只读或已变化")
 			}
 			delete(p.Files, str(a, "path"))
+			for _, frame := range p.Tasks[s.Task].Frames {
+				for key, material := range frame.Materials {
+					if material.Resource == "file:"+str(a, "path") {
+						delete(frame.Materials, key)
+					}
+				}
+			}
 			return "已从草稿移除，历史保留", nil
 		})
 	case "ask_user":
@@ -328,7 +356,14 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 	case "propose_plan":
 		return e.record(s, c, nil, func(p *core.Project) (any, error) {
 			task := p.Tasks[s.Task]
-			task.Plan = &core.Plan{Revision: core.ID(), Text: str(a, "plan"), Acceptance: stringsArg(a, "acceptance"), Approved: task.Mode == "build"}
+			delivery, err := decodeArgument[*core.DeliveryScope](a, "delivery")
+			if err != nil {
+				return nil, err
+			}
+			if err := validateDelivery(delivery, stringsArg(a, "acceptance")); err != nil {
+				return nil, err
+			}
+			task.Plan = &core.Plan{Delivery: delivery, Revision: core.ID(), Text: str(a, "plan"), Acceptance: stringsArg(a, "acceptance"), Approved: task.Mode == "build"}
 			if len(task.Plan.Acceptance) == 0 {
 				return nil, errors.New("计划必须列出验收条件")
 			}
@@ -339,14 +374,50 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 			return task.Plan, nil
 		})
 	case "check_artifacts":
-		files, err := e.Store.Files(s.Owner, p.Files)
+		manifest := core.Manifest{}
+		selected := stringsArg(a, "paths")
+		if len(selected) > 0 {
+			for _, name := range selected {
+				file, ok := p.Files[name]
+				if !ok {
+					return fail(fmt.Errorf("检查文件不存在：%s", name))
+				}
+				manifest[name] = file
+			}
+		} else {
+			manifest, err = deliveryManifest(p, t)
+			if err != nil {
+				return fail(err)
+			}
+		}
+		files, err := e.Store.Files(s.Owner, manifest)
 		if err != nil {
 			return "", err
 		}
-		report := checkArtifacts(files, p.Files)
+		assertions, err := decodeArgument[[]core.ArtifactAssertion](a, "assertions")
+		if err != nil {
+			return fail(err)
+		}
+		if err := validateAssertions(assertions); err != nil {
+			return fail(err)
+		}
+		report := checkArtifacts(files, manifest)
+		bytesByPath := map[string][]byte{}
+		for name, body := range files {
+			bytesByPath[name] = []byte(body)
+		}
+		for _, check := range artifactChecks(bytesByPath, assertions) {
+			report.Checks = append(report.Checks, check)
+			if check.Status == "failed" {
+				report.Status = "failed"
+			}
+		}
+		report.Evidence = evidenceFor(t, s, manifest, nil)
 		return e.record(s, c, nil, func(p *core.Project) (any, error) {
-			if p.Files.Digest() != report.Digest {
-				return nil, errors.New("检查期间文件变化")
+			for name, file := range manifest {
+				if p.Files[name] != file {
+					return nil, errors.New("检查期间文件变化")
+				}
 			}
 			p.Reports = append(p.Reports, report)
 			return report, nil
@@ -377,7 +448,7 @@ func (e *Engine) execute(ctx context.Context, s scope, c core.Call, a map[string
 			}
 			version := core.Version{ID: core.ID(), Number: len(p.Versions) + 1, TaskID: task.ID, At: core.Now(), Summary: str(a, "summary"), Manifest: core.Clone(p.Files)}
 			for _, report := range p.Reports {
-				if report.Digest == p.Files.Digest() {
+				if reportCurrent(p, task, report) {
 					version.Reports = append(version.Reports, report)
 				}
 			}
