@@ -502,7 +502,7 @@ export default function App() {
   const [mode, setMode] = useState(initialDraft?.mode || "build");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [sidebar, setSidebar] = useState(false);
+  const [sidebar, setSidebar] = useState(true);
   const [mobileNav, setMobileNav] = useState(false);
   const [pane, setPane] = useState<"chat" | "work">("chat");
   const [tab, setTab] = useState("preview");
