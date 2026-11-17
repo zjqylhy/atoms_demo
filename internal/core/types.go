@@ -366,14 +366,16 @@ type Report struct {
 	Evidence *ReportEvidence `json:"evidence,omitempty"`
 }
 type Version struct {
-	PreviewReady bool     `json:"preview_ready,omitempty"`
-	ID           string   `json:"id"`
-	Number       int      `json:"number"`
-	TaskID       string   `json:"task_id"`
-	At           string   `json:"at"`
-	Summary      string   `json:"summary"`
-	Manifest     Manifest `json:"manifest"`
-	Reports      []Report `json:"reports"`
+	PreviewReady    bool     `json:"preview_ready,omitempty"`
+	PreviewEntry    string   `json:"preview_entry,omitempty"`
+	PreviewReportID string   `json:"preview_report_id,omitempty"`
+	ID              string   `json:"id"`
+	Number          int      `json:"number"`
+	TaskID          string   `json:"task_id"`
+	At              string   `json:"at"`
+	Summary         string   `json:"summary"`
+	Manifest        Manifest `json:"manifest"`
+	Reports         []Report `json:"reports"`
 }
 type Event struct {
 	Seq  int64  `json:"seq"`
@@ -439,10 +441,20 @@ func (p *Project) Public() any {
 	versions := make([]Version, len(p.Versions))
 	copy(versions, p.Versions)
 	for i := range versions {
-		versions[i].PreviewReady = PreviewHTML(versions[i].Reports, versions[i].Manifest) != ""
+		preview := findWebPreview(versions[i].Reports, versions[i].Manifest)
+		versions[i].PreviewReady = preview.html != ""
+		versions[i].PreviewEntry = preview.entry
+		versions[i].PreviewReportID = preview.reportID
 		versions[i].Reports = publicReports(versions[i].Reports)
 	}
-	return map[string]any{"id": p.ID, "source": p.Source, "recovery": p.Recovery, "preview_ready": PreviewHTML(p.Reports, p.Files) != "", "title": p.Title, "created": p.Created, "updated": p.Updated, "active_run": p.ActiveRun, "current_task": p.CurrentTask, "head": p.Head, "files": p.Files, "messages": p.Messages, "tasks": tasks, "runs": runs, "versions": versions, "reports": publicReports(p.Reports), "events": publicEvents(p.Events)}
+	preview := findWebPreview(p.Reports, p.Files)
+	return map[string]any{
+		"id": p.ID, "source": p.Source, "recovery": p.Recovery, "title": p.Title,
+		"created": p.Created, "updated": p.Updated, "active_run": p.ActiveRun, "current_task": p.CurrentTask, "head": p.Head,
+		"preview_ready": preview.html != "", "preview_entry": preview.entry, "preview_report_id": preview.reportID,
+		"files": p.Files, "messages": p.Messages, "tasks": tasks, "runs": runs, "versions": versions,
+		"reports": publicReports(p.Reports), "events": publicEvents(p.Events),
+	}
 }
 
 func publicReports(reports []Report) []Report {
