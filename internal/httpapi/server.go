@@ -296,16 +296,12 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 	}
 	send(w, 200, p.Public())
 }
-func selected(p *core.Project, id string) (core.Manifest, error) {
-	if id == "" || id == "draft" {
-		return p.Files, nil
+func selected(p *core.Project, version string) (core.Manifest, []core.Report, error) {
+	files, reports, err := p.PreviewFiles(version)
+	if err != nil {
+		return nil, nil, errors.New("版本不存在")
 	}
-	for _, v := range p.Versions {
-		if v.ID == id {
-			return v.Manifest, nil
-		}
-	}
-	return nil, errors.New("版本不存在")
+	return files, reports, nil
 }
 func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 	p, err := s.Store.Get(owner(r), r.PathValue("id"))
@@ -313,7 +309,7 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 404, core.ErrNotFound)
 		return
 	}
-	manifest, err := selected(p, r.URL.Query().Get("version"))
+	manifest, _, err := selected(p, r.URL.Query().Get("version"))
 	if err != nil {
 		s.fail(w, 404, err)
 		return
@@ -347,7 +343,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 404, core.ErrNotFound)
 		return
 	}
-	manifest, err := selected(p, r.URL.Query().Get("version"))
+	manifest, reports, err := selected(p, r.URL.Query().Get("version"))
 	if err != nil {
 		s.fail(w, 404, err)
 		return
@@ -370,7 +366,7 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 		}
 		contract = &parsed
 	}
-	markup := core.PreviewHTML(p.Reports, manifest)
+	markup := core.PreviewHTML(reports, manifest)
 	if r.URL.Query().Get("format") == "html" {
 		if markup == "" {
 			s.fail(w, 409, errors.New("此版本没有已构建网页，请先运行检查"))
@@ -405,12 +401,12 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, 404, core.ErrNotFound)
 		return
 	}
-	manifest, err := selected(p, r.URL.Query().Get("version"))
+	manifest, reports, err := selected(p, r.URL.Query().Get("version"))
 	if err != nil {
 		s.fail(w, 404, err)
 		return
 	}
-	markup := core.PreviewHTML(p.Reports, manifest)
+	markup := core.PreviewHTML(reports, manifest)
 	if markup == "" {
 		s.fail(w, 404, errors.New("尚未生成可预览构建，请查看文件或继续执行"))
 		return

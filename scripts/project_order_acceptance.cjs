@@ -3,14 +3,14 @@ const fs=require('node:fs/promises'),path=require('node:path'),net=require('node
 const {chromium}=require('../runner/node_modules/playwright');
 const root=path.resolve(__dirname,'..'),out=path.join(root,'artifacts','project-order-'+new Date().toISOString().replace(/[:.]/g,'-'));
 let server,browser,base,page,port;const results=[],errors=[];
+const password = 'isolated ordering password 2026';
 const pause=ms=>new Promise(r=>setTimeout(r,ms));
 async function waitFor(check){for(let i=0;i<120;i++){if(await check())return;await pause(100);}throw Error('condition timed out');}
 async function api(ctx,url,method='GET',body){const boot=await(await ctx.request.get(base+'/api/bootstrap')).json();const response=await ctx.request.fetch(base+'/api'+url,{method,headers:{'X-CSRF-Token':boot.csrf},data:body});return{status:response.status(),data:await response.json()};}
 function pass(name){results.push({name,status:'passed'});console.log('PASS '+name);}
 async function start(){const env={...process.env,ATOMS_ADDR:`127.0.0.1:${port}`,ATOMS_PUBLIC_URL:'',ATOMS_DATA_DIR:path.join(out,'data'),ATOMS_WEB_DIR:path.join(root,'web/dist'),ATOMS_LLM_API_KEY:'',ATOMS_LLM_BASE_URL:'',ATOMS_LLM_MODEL:'',ATOMS_BACKUP_LLM_API_KEY:'',ATOMS_BACKUP_LLM_BASE_URL:'',ATOMS_BACKUP_LLM_MODEL:'',ATOMS_RUNNER_TOKEN:'',ATOMS_RUNNER_URL:''};server=spawn(path.join(root,'tmp',process.platform==='win32'?'acceptance-server.exe':'acceptance-server'),[],{cwd:root,env,windowsHide:true,stdio:['ignore','pipe','pipe']});server.stdout.on('data',d=>fs.appendFile(path.join(out,'server.log'),d));server.stderr.on('data',d=>fs.appendFile(path.join(out,'server.log'),d));await waitFor(async()=>{try{return(await fetch(base+'/healthz')).ok;}catch{return false;}});}
 async function stop(){if(server&&server.exitCode===null){const done=new Promise(r=>server.once('exit',r));server.kill('SIGKILL');await done;}}
-async function register(p,name){await p.goto(base);await p.getByRole('button',{name:'创建账号',exact:true}).click();await p.getByLabel('用户名',{exact:true}).fill(name);await p.getByLabel('密码',{exact:true}).fill('isolated ordering password 2026');await p.getByLabel('确认密码',{exact:true}).fill('isolated ordering password 2026');await p.getByRole('button',{name:'注册并进入',exact:true}).click();await p.getByRole('button',{name:'退出',exact:true}).waitFor();}
-async function sidebar(p){const toggle=p.getByRole('button',{name:p.viewportSize().width<700?'打开项目列表':'切换侧边栏',exact:true});if(await toggle.getAttribute('aria-expanded')==='false')await toggle.click();}
+async function register(p,name){await p.goto(base);await p.getByRole('button',{name:'创建账号',exact:true}).click();await p.getByLabel('用户名',{exact:true}).fill(name);await p.getByLabel('密码',{exact:true}).fill(password);await p.getByLabel('确认密码',{exact:true}).fill(password);await p.getByRole('button',{name:'注册并进入',exact:true}).click();await p.getByRole('button',{name:'退出',exact:true}).waitFor();}
 async function ids(p){return p.locator('.project-row').evaluateAll(rows=>rows.map(row=>row.dataset.projectId));}
 async function expectOrder(p,want){await waitFor(async()=>JSON.stringify(await ids(p))===JSON.stringify(want));}
 async function saved(p){await p.locator('.project-order-status').filter({hasText:'共享顺序已保存'}).waitFor();}
@@ -20,7 +20,35 @@ function watch(p){p.setDefaultTimeout(12000);p.on('pageerror',e=>errors.push(e.m
   await fs.mkdir(out,{recursive:true});const listener=net.createServer();await new Promise(r=>listener.listen(0,'127.0.0.1',r));port=listener.address().port;await new Promise(r=>listener.close(r));base=`http://127.0.0.1:${port}`;await start();
   browser=await chromium.launch({headless:true,...(process.platform==='win32'?{executablePath:'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'}:{})});const a=await browser.newContext({viewport:{width:1440,height:1000}});page=await a.newPage();watch(page);await register(page,'order_alice');
   const one=(await api(a,'/projects','POST',{title:'排序一'})).data.id,two=(await api(a,'/projects','POST',{title:'排序二'})).data.id,three=(await api(a,'/projects','POST',{title:'排序三'})).data.id;
-  await page.reload();await sidebar(page);await expectOrder(page,[three,two,one]);await page.locator(`[data-project-id="${two}"] .project`).click();await page.getByLabel('描述需求',{exact:true}).fill('排序时保留草稿');await page.waitForURL(url=>url.searchParams.get('project')===two);const selectedURL=page.url();
+  const desktopList = page.getByRole('navigation', {name:'共享项目列表', exact:true});
+  const desktopToggle = page.getByRole('button', {name:'切换侧边栏', exact:true});
+  const newestProject = desktopList.getByRole('button', {name:'排序三', exact:true});
+  await page.getByRole('button', {name:'退出', exact:true}).click();
+  await page.getByLabel('用户名', {exact:true}).fill('order_alice');
+  await page.getByLabel('密码', {exact:true}).fill(password);
+  await page.getByRole('button', {name:'登录', exact:true}).click();
+  await newestProject.waitFor();
+  await expectOrder(page, [three,two,one]);
+  pass('desktop login shows the shared history without opening the sidebar manually');
+
+  await desktopToggle.click();
+  await desktopList.waitFor({state:'hidden'});
+  await desktopToggle.click();
+  await newestProject.waitFor();
+  await desktopToggle.click();
+  await desktopList.waitFor({state:'hidden'});
+  await page.reload();
+  await newestProject.waitFor();
+  pass('desktop sidebar can be toggled and opens again on reload');
+
+  await page.goto(`${base}/?project=${one}`);
+  await page.locator(`[data-project-id="${one}"] .project.active`).waitFor();
+  pass('desktop project links show the sidebar with the linked project selected');
+
+  await desktopList.getByRole('button', {name:'排序二', exact:true}).click();
+  await page.waitForURL(url=>url.searchParams.get('project')===two);
+  await page.getByLabel('描述需求',{exact:true}).fill('排序时保留草稿');
+  const selectedURL=page.url();
   await drag(page,one,0);await saved(page);await expectOrder(page,[one,three,two]);assert.equal(page.url(),selectedURL);assert.equal(await page.getByLabel('描述需求',{exact:true}).inputValue(),'排序时保留草稿');assert.equal(await page.getByRole('dialog').count(),0);pass('mouse drag persists global order without opening/deleting a project or losing the selected draft');
   await drag(page,one,2);await expectOrder(page,[three,two,one]);await saved(page);await drag(page,one,0);await expectOrder(page,[one,three,two]);await saved(page);pass('mouse dragging works down across multiple rows and back up');
   await page.getByRole('button',{name:'拖动排序：排序一',exact:true}).click();
@@ -32,8 +60,8 @@ function watch(p){p.setDefaultTimeout(12000);p.on('pageerror',e=>errors.push(e.m
   await page.mouse.move(cancelStart.x+cancelStart.width/2,cancelStart.y+cancelStart.height/2);await page.mouse.down();await page.mouse.move(cancelStart.x+cancelStart.width/2,cancelEnd.y+cancelEnd.height/2,{steps:8});await expectOrder(page,[three,two,one]);await page.keyboard.press('Escape');await page.mouse.up();await expectOrder(page,[one,three,two]);assert.equal((await api(a,'/project-order')).data.revision,cancelOrder.revision);pass('Escape cancels a downward drag without saving or leaving the list locked');
   let releaseSave,saveEntered,writeCount=0;const saveGate=new Promise(resolve=>releaseSave=resolve),saveSignal=new Promise(resolve=>saveEntered=resolve);
   await page.route('**/api/project-order',async route=>{if(route.request().method()!=='PUT')return route.continue();writeCount++;saveEntered();await saveGate;await route.continue();});await page.getByRole('button',{name:'拖动排序：排序一',exact:true}).click();await page.keyboard.press('ArrowDown');await saveSignal;await page.keyboard.press('ArrowDown');assert.equal(writeCount,1);await page.getByLabel('描述需求',{exact:true}).click();releaseSave();await expectOrder(page,[three,one,two]);await saved(page);assert.equal(await page.evaluate(()=>document.activeElement.getAttribute('aria-label')),'描述需求');await page.unroute('**/api/project-order');await page.getByRole('button',{name:'拖动排序：排序一',exact:true}).press('ArrowUp');await expectOrder(page,[one,three,two]);await saved(page);pass('saving rejects a second move and does not steal focus after the user leaves the handle');
-  await page.reload();await sidebar(page);await expectOrder(page,[one,three,two]);assert.equal(await page.getByLabel('描述需求',{exact:true}).inputValue(),'排序时保留草稿');
-  const b=await browser.newContext({viewport:{width:1440,height:1000}}),other=await b.newPage();watch(other);await register(other,'order_bob');await sidebar(other);await expectOrder(other,[one,three,two]);pass('refresh and a second account see the same saved order');
+  await page.reload();await desktopList.waitFor();await expectOrder(page,[one,three,two]);assert.equal(await page.getByLabel('描述需求',{exact:true}).inputValue(),'排序时保留草稿');
+  const b=await browser.newContext({viewport:{width:1440,height:1000}}),other=await b.newPage();watch(other);await register(other,'order_bob');await other.getByRole('navigation',{name:'共享项目列表',exact:true}).waitFor();await expectOrder(other,[one,three,two]);pass('refresh and a second account see the same saved order');
   await api(b,`/projects/${two}`,'PATCH',{title:'排序二已更新'});await other.evaluate(()=>window.dispatchEvent(new Event('focus')));await other.getByRole('button',{name:'拖动排序：排序二已更新',exact:true}).waitFor();await expectOrder(other,[one,three,two]);
   await other.getByRole('button',{name:'拖动排序：排序二已更新',exact:true}).press('ArrowUp');await saved(other);await expectOrder(other,[one,two,three]);await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await expectOrder(page,[one,two,three]);pass('content updates keep order; keyboard reorder is shared on window focus');
   // Alice holds an old revision while Bob writes. A 409 must restore Bob's order.
@@ -41,9 +69,26 @@ function watch(p){p.setDefaultTimeout(12000);p.on('pageerror',e=>errors.push(e.m
   const snapshot=(await api(b,'/project-order')).data;assert.equal((await api(b,'/project-order','PUT',{revision:snapshot.revision,ids:[two,one,three]})).status,200);await page.mouse.up();await page.locator('.project-order-status').filter({hasText:'已被其他人修改'}).waitFor();await expectOrder(page,[two,one,three]);pass('concurrent reorder rejects a stale write and restores the latest shared order');
   await page.route('**/api/project-order',route=>route.request().method()==='PUT'?route.fulfill({status:503,contentType:'application/json',body:'{"error":"injected save failure"}'}):route.continue());await drag(page,three,0);await page.locator('.project-order-status').filter({hasText:'排序未保存'}).waitFor();await expectOrder(page,[two,one,three]);await page.unroute('**/api/project-order');pass('a failed save restores server order and shows the failure');
   const four=(await api(b,'/projects','POST',{title:'排序四'})).data.id;await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await expectOrder(page,[four,two,one,three]);await api(b,`/projects/${one}`,'DELETE',{});await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await expectOrder(page,[four,two,three]);pass('new projects appear first and deletion preserves remaining relative order');
-  await stop();await start();await page.reload();await sidebar(page);await expectOrder(page,[four,two,three]);pass('saved global order survives a hard backend restart');
+  await stop();await start();await page.reload();await desktopList.waitFor();await expectOrder(page,[four,two,three]);pass('saved global order survives a hard backend restart');
   // Use Chromium's native touch events, not HTML drag events or mocked pointer handlers.
-  const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,storageState:await a.storageState()}),touch=await mobile.newPage();watch(touch);await touch.goto(base);await sidebar(touch);await expectOrder(touch,[four,two,three]);const cdp=await mobile.newCDPSession(touch),startBox=await touch.locator(`[data-project-id="${three}"] .project-drag`).boundingBox(),endBox=await touch.locator('.project-row').first().boundingBox(),x=startBox.x+startBox.width/2,y=startBox.y+startBox.height/2,endY=endBox.y+endBox.height/2;
+  const mobile=await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,storageState:await a.storageState()}),touch=await mobile.newPage();watch(touch);
+  await touch.goto(base);
+  const mobileToggle = touch.getByRole('button', {name:'打开项目列表', exact:true});
+  const mobileList = touch.getByRole('navigation', {name:'共享项目列表', exact:true});
+  await mobileToggle.waitFor();
+  assert.equal(await mobileToggle.getAttribute('aria-expanded'), 'false');
+  await mobileList.waitFor({state:'hidden'});
+  await mobileToggle.tap();
+  await mobileList.getByRole('button', {name:'排序四', exact:true}).waitFor();
+  await touch.getByRole('button', {name:'关闭项目列表', exact:true}).tap({position:{x:370, y:20}});
+  await mobileList.waitFor({state:'hidden'});
+  assert.equal(await mobileToggle.getAttribute('aria-expanded'), 'false');
+  pass('mobile sidebar starts closed and opens and closes as a drawer');
+
+  await mobileToggle.tap();
+  await mobileList.waitFor();
+  await expectOrder(touch,[four,two,three]);
+  const cdp=await mobile.newCDPSession(touch),startBox=await touch.locator(`[data-project-id="${three}"] .project-drag`).boundingBox(),endBox=await touch.locator('.project-row').first().boundingBox(),x=startBox.x+startBox.width/2,y=startBox.y+startBox.height/2,endY=endBox.y+endBox.height/2;
   await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x,y}]});for(let i=1;i<=8;i++)await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x,y:y+(endY-y)*i/8}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await saved(touch);await expectOrder(touch,[three,four,two]);await touch.screenshot({path:path.join(out,'mobile-shared-order.png'),fullPage:true});pass('native touch dragging at 390px saves the shared order');
   const top=await touch.locator(`[data-project-id="${three}"] .project-drag`).boundingBox(),bottom=await touch.locator('.project-row').last().boundingBox(),touchX=top.x+top.width/2,touchY=top.y+top.height/2,bottomY=bottom.y+bottom.height/2;
   await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:touchX,y:touchY}]});for(let i=1;i<=8;i++){await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:touchX,y:touchY+(bottomY-touchY)*i/8}]});await pause(16);}await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await expectOrder(touch,[four,two,three]);await saved(touch);pass('native touch dragging down survives list reconciliation');

@@ -67,7 +67,6 @@ function pass(name) { results.push({ name, status: 'passed' }); console.log('PAS
   }
   await load('stopped', [run(currentTask, 'failed', configError), run(currentTask, 'stopped', '', 25)]);
   assert.equal(await page.locator('.recovery .failure-detail').count(), 0, 'A later stopped run must not show the earlier missing-key error');
-  await page.getByRole('button', { name: '切换侧边栏', exact: true }).click();
   await page.getByText('模型服务已配置', { exact: true }).waitFor();
   await page.screenshot({ path: path.join(out, 'restored-key-stopped-task.png'), fullPage: true });
   pass('restored key and later stopped run do not inherit the old configuration error');

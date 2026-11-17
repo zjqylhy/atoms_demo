@@ -55,8 +55,13 @@ type Report = {
   checks: { name: string; status: string; detail: string }[];
   details?: Record<string, unknown>;
 };
-type Version = {
+type PreviewInfo = {
   preview_ready?: boolean;
+  preview_entry?: string;
+  preview_report_id?: string;
+};
+type PreviewFileSelection = { projectId: string; version: string; path: string };
+type Version = PreviewInfo & {
   id: string;
   number: number;
   summary: string;
@@ -82,11 +87,10 @@ type Task = {
 type Message = { id: string; role: string; text: string; kind: string };
 type ActivityEvent = { seq: number; kind: string; role?: string; text: string; at: string };
 type Process = { start: number; entries: (Message | ActivityEvent)[] };
-type Project = {
+type Project = PreviewInfo & {
   source?: {kind:string;template?:string};
   recovery?: {project_id:string;run_id:string;reason:string;unavailable?:boolean};
   head?: string;
-  preview_ready?: boolean;
   id: string;
   title: string;
   updated: string;
@@ -502,12 +506,13 @@ export default function App() {
   const [mode, setMode] = useState(initialDraft?.mode || "build");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [sidebar, setSidebar] = useState(false);
+  const [sidebar, setSidebar] = useState(true);
   const [mobileNav, setMobileNav] = useState(false);
   const [pane, setPane] = useState<"chat" | "work">("chat");
-  const [tab, setTab] = useState("preview");
+  const [selectedTab, setTab] = useState("preview");
   const [selectedVersion, setVersion] = useState("");
   const [selectedPath, setPath] = useState("");
+  const [previewFile, setPreviewFile] = useState<PreviewFileSelection>();
   const [content, setContent] = useState("");
   const [oldContent, setOldContent] = useState("");
   const [mobile, setMobile] = useState(false);
@@ -531,7 +536,7 @@ export default function App() {
   const fallback = useFallbackNavigation({user:userID, current:currentProject, selected:selection.current, onCommit:acceptDemo, onError:message=>{setError(message);if(message)setPane('chat');}});
   const project = fallback.candidate?.project ?? currentProject;
   const version = fallback.candidate?.version ?? selectedVersion;
-  const path = fallback.candidate ? 'index.html' : selectedPath;
+  const tab = fallback.candidate ? "preview" : selectedTab;
   const task = project?.tasks.find((t) => t.id === project.current_task);
   // The API orders runs by start time; older failures must not describe a later run.
   const latestTaskRun = task && project?.runs.filter((run) => run.task_id === task.id).at(-1);
@@ -551,6 +556,30 @@ export default function App() {
       ...(tab === "history" ? Object.keys(previousManifest) : []),
     ]),
   ].sort();
+  const preview = selected ?? project;
+  const previewReady = !!preview?.preview_ready;
+  const isHTML = (name: string) => name.endsWith(".html") && Object.hasOwn(manifest, name) && !manifest[name].binary;
+  const previewEntry = preview?.preview_entry && isHTML(preview.preview_entry) ? preview.preview_entry : "";
+  const requestedPreviewPath = previewFile && previewFile.projectId === project?.id && previewFile.version === version
+    ? previewFile.path
+    : "";
+  const manualPreviewPath = Object.hasOwn(manifest, requestedPreviewPath) ? requestedPreviewPath : "";
+  const showWebPreview = tab === "preview" && previewReady &&
+    (!manualPreviewPath || manualPreviewPath === previewEntry);
+  const showUnnamedPreviewOption = tab === "preview" && previewReady && !previewEntry;
+  let path: string;
+  if (tab === "preview") {
+    // Only a saved build determines the actual entry. HTML filenames help
+    // choose what to display while no matching build is available.
+    const pendingPage = isHTML("index.html") ? "index.html" : files.find(isHTML);
+    path = showWebPreview ? previewEntry : manualPreviewPath || pendingPage || files[0] || "";
+  } else {
+    path = files.includes(selectedPath)
+      ? selectedPath
+      : files.find((name) => name.endsWith("index.html")) || files[0] || "";
+  }
+  const waitingForPreview = tab === "preview" && !previewReady && isHTML(path);
+  const sourceFile = showWebPreview || waitingForPreview ? undefined : manifest[path];
   const reports = selected?.reports || project?.reports || [];
   useEffect(() => {
     if (!task) return;
@@ -564,9 +593,29 @@ export default function App() {
   async function list() {
     return order.refresh();
   }
+  function selectVersion(next: string) {
+    setVersion(next);
+    setPreviewFile((choice) => choice?.version === next ? choice : undefined);
+  }
+  function showDefaultPreview(nextVersion = "") {
+    setVersion(nextVersion);
+    setPath("");
+    setPreviewFile(undefined);
+    setTab("preview");
+  }
+  function selectFile(name: string) {
+    if (tab === "preview") {
+      setPreviewFile(project && name ? { projectId: project.id, version, path: name } : undefined);
+    } else {
+      setPath(name);
+    }
+  }
   function acceptDemo(demo: Project, targetVersion: string, from: string) {
     selection.current = demo.id;
-    setProject(demo); setVersion(targetVersion); setPath('index.html'); setPane('work'); setTab('preview'); setMobileNav(false);
+    setProject(demo);
+    showDefaultPreview(targetVersion);
+    setPane("work");
+    setMobileNav(false);
     rememberProject(userID,demo.id); history.replaceState(null,'',projectLocation(demo.id,from));
     void list().catch(() => {});
   }
@@ -587,19 +636,18 @@ export default function App() {
     setMobileNav(false);
     selection.current = id;
     setError("");
-    setVersion("");
-    setPath("");
-    setPane("chat");
     try {
       const p = await api("/projects/" + id);
       if (selection.current === id && fallback.isCurrent(navigation)) {
         applySnapshot(p);
+        const demoOrigin = p.source?.kind === "fallback" ? options.from : undefined;
+        showDefaultPreview(demoOrigin ? p.head || "" : "");
+        setPane(demoOrigin ? "work" : "chat");
         rememberProject(userID, id);
         history.replaceState(null, "", projectLocation(id,options.from));
         fallback.follow(p,navigation,options.initial);
-        if(options.from && p.source?.kind==='fallback') {
-          setPane('work');setTab('preview');setVersion(p.head||'');setPath('index.html');
-          const valid = await fallback.restoreOrigin(p,options.from,navigation);
+        if(demoOrigin) {
+          const valid = await fallback.restoreOrigin(p,demoOrigin,navigation);
           if(valid===false && fallback.isCurrent(navigation)) history.replaceState(null,'',projectLocation(id));
         }
         return true;
@@ -673,12 +721,13 @@ export default function App() {
     end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [project?.messages?.length, task?.status]);
   useEffect(() => {
-    if (!files.includes(path))
-      setPath(files.find((p) => p.endsWith("index.html")) || files[0] || "");
-  }, [JSON.stringify(files), version]);
+    if (requestedPreviewPath && !manualPreviewPath) {
+      setPreviewFile((choice) => choice === previewFile ? undefined : choice);
+    }
+  }, [previewFile, requestedPreviewPath, manualPreviewPath]);
   useEffect(() => {
     setContent("");
-    if (!project || !path || !manifest[path]) return;
+    if (!project || !path || !sourceFile) return;
     let live = true;
     api(
       `/projects/${project.id}/files?path=${encodeURIComponent(path)}&version=${version}`,
@@ -692,7 +741,7 @@ export default function App() {
     return () => {
       live = false;
     };
-  }, [project?.id, path, version, manifest[path]?.hash]);
+  }, [project?.id, path, version, sourceFile?.hash]);
   useEffect(() => {
     setOldContent("");
     if (!project || !path || tab !== "history") return;
@@ -738,7 +787,7 @@ export default function App() {
         if (actionName === "submit" || actionName === "steer") {
           setText((draft) => (draft === extra.text ? "" : draft));
         }
-        if (actionName !== "steer") setVersion("");
+        if (actionName !== "steer") selectVersion("");
       }
       if (actionName !== "steer") await list();
     } catch (e) {
@@ -808,8 +857,7 @@ export default function App() {
     setProject(undefined);
     setInputOpen(false); setConfirm(undefined); setRename(undefined);
     setContent(""); setOldContent(""); retry.current = undefined;
-    setVersion("");
-    setPath("");
+    showDefaultPreview();
     setText("");
     setError("");
     rememberProject(userID, "");
@@ -1008,7 +1056,7 @@ export default function App() {
               <br className="small-only" /> Products out<span>.</span>
             </h1>
             <p className="intro">和你的 AI 团队一起，把想法变成真正的作品。</p>
-            <Catalog csrf={boot?.csrf||''} onOpen={async id=>{await list();if(await open(id)){setPane('work');setTab('preview');}}}/>
+            <Catalog csrf={boot?.csrf||''} onOpen={async id=>{await list();if(await open(id))setPane('work');}}/>
             {composer}
             <div className="mode-explain">
               <Sparkles size={14} />
@@ -1067,7 +1115,7 @@ export default function App() {
             {project.source?.kind==='fallback' ? <FallbackNotice origin={fallback.candidate ? undefined : fallback.origin} onReturn={id=>void open(id)}/> : project.source && <div className="source-banner">预置示例副本 · 可交互、可保存，可继续提出修改要求</div>}
             {fallback.phase && <div className="source-banner fallback-loading" role="status">正在打开演示应用…<button onClick={()=>{fallback.cancel();setPane('chat');}}>留在原任务</button></div>}
             {project.recovery && !project.recovery.unavailable && <div className="source-banner">演示应用已就绪，原需求尚未完成。<button disabled={!!fallback.phase} onClick={()=>void fallback.openDemo(project)}>打开演示应用</button></div>}
-            {task?.status==='failed' && project.head && <div className="source-banner">本次修改未完成，之前的成功版本和应用数据已保留。<button onClick={()=>{setVersion(project.head!);setPath('index.html');setPane('work');setTab('preview');}}>查看上一可用版本</button></div>}
+            {task?.status==='failed' && project.head && <div className="source-banner">本次修改未完成，之前的成功版本和应用数据已保留。<button onClick={()=>{showDefaultPreview(project.head);setPane('work');}}>查看上一可用版本</button></div>}
             <div className={"workspace show-" + pane} inert={!!fallback.phase}>
               <section className="conversation">
                 <div className="conversation-heading">
@@ -1224,7 +1272,10 @@ export default function App() {
                           key={key as string}
                           className={tab === key ? "active" : ""}
                           aria-pressed={tab === key}
-                          onClick={() => setTab(key as string)}
+                          onClick={() => {
+                            if (key === "preview") setPreviewFile(undefined);
+                            setTab(key as string);
+                          }}
                         >
                           <I size={16} />
                           {label as string}
@@ -1236,7 +1287,7 @@ export default function App() {
                     <select
                       aria-label="选择版本"
                       value={version}
-                      onChange={(e) => setVersion(e.target.value)}
+                      onChange={(e) => selectVersion(e.target.value)}
                     >
                       <option value="">当前草稿</option>
                       {(project.versions || [])
@@ -1272,7 +1323,7 @@ export default function App() {
                         ? "当前文件与已交付版本一致"
                         : "当前草稿 · 通过检查后形成交付版本"}
                   </span>
-                  {tab === "preview" && path.endsWith(".html") && (
+                  {showWebPreview && (
                     <div>
                       <button
                         className={"icon " + (!mobile ? "selected" : "")}
@@ -1298,7 +1349,7 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                {!files.length ? (
+                {!files.length && !showWebPreview ? (
                   <div className="empty-work">
                     <div className="empty-illustration"><Eye size={24} /></div>
                     <h2>暂无产物</h2>
@@ -1310,8 +1361,9 @@ export default function App() {
                       <select
                         aria-label="选择文件"
                         value={path}
-                        onChange={(e) => setPath(e.target.value)}
+                        onChange={(e) => selectFile(e.target.value)}
                       >
+                        {showUnnamedPreviewOption && <option value="">网页预览</option>}
                         {files.map((f) => (
                           <option key={f} value={f}>
                             {manifest[f]?.read_only ? "🔒 " : ""}
@@ -1319,7 +1371,7 @@ export default function App() {
                           </option>
                         ))}
                       </select>
-                      <span>{manifest[path] ? `${manifest[path].size.toLocaleString()} B` : "已删除"}</span>
+                      <span>{manifest[path] ? `${manifest[path].size.toLocaleString()} B` : path ? "已删除" : ""}</span>
                       {manifest[path] && <button
                         onClick={() => downloadFile(`/projects/${project.id}/files?path=${encodeURIComponent(path)}&version=${version}&download=1`, path.split('/').pop() || 'file').catch(e => setError(e.message))}
                         title="下载该文件"
@@ -1379,14 +1431,14 @@ export default function App() {
                       <pre className="source">
                         <code>{content}</code>
                       </pre>
-                    ) : path.endsWith(".html") && !(selected ? selected.preview_ready : project.preview_ready) ? (
+                    ) : waitingForPreview ? (
                       <div className="empty-work"><h2>文件已保存，等待运行检查</h2><p>构建完成后将在这里显示交互预览。<br />现在可以切换到“文件”查看源码。</p></div>
-                    ) : path.endsWith(".html") ? (
+                    ) : showWebPreview ? (
                       <div
                         className={"preview-wrap " + (mobile ? "mobile " : "") + (fallback.candidate ? "preview-preparing" : "")}
                       >
                         <AppPreview
-                          key={`${project.id}-${boot!.csrf}-${previewHead ?? ""}-${version}-${refresh}-${files.map(name => name + manifest[name]?.hash).join("|")}`}
+                          key={`${project.id}-${boot!.csrf}-${previewHead ?? ""}-${version}-${preview?.preview_report_id ?? ""}-${refresh}-${files.map(name => name + manifest[name]?.hash).join("|")}`}
                           projectId={project.id} version={version} csrf={boot!.csrf}
                           requireFormal={!!fallback.candidate}
                           onReady={()=>fallback.previewReady(project.id,fallback.candidate?.token)}

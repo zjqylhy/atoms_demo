@@ -6,6 +6,7 @@ import (
 	"mockatoms/internal/store"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,13 +35,16 @@ func TestPreviewRouteUsesFileDependenciesAndPreservesSavedVersion(t *testing.T) 
 		p.Reports = []core.Report{r}
 		p.Files["output.bin"] = newOutput
 		p.Versions = []core.Version{{ID: "saved", Manifest: core.Clone(p.Files), Reports: p.Reports}}
+		draft := r
+		draft.Details = []byte(`{"preview_html":"<p>draft page</p>"}`)
+		p.Reports = append(p.Reports, draft)
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := &Server{Store: db}
-	request := func(query string, want int) {
+	request := func(query string, want int, html string) {
 		t.Helper()
 		r := httptest.NewRequest("GET", "/preview"+query, nil)
 		r.SetPathValue("id", p.ID)
@@ -50,15 +54,24 @@ func TestPreviewRouteUsesFileDependenciesAndPreservesSavedVersion(t *testing.T) 
 		if w.Code != want {
 			t.Fatal("wrong preview status", w.Code, w.Body.String())
 		}
-		if want == 200 && (w.Body.String() != "<p>saved page</p>" || w.Header().Get("Content-Security-Policy") == "") {
+		if want == 200 && (w.Body.String() != html || w.Header().Get("Content-Security-Policy") == "") {
 			t.Fatal("preview content or isolation changed")
 		}
 	}
-	request("", 200)
+	request("", 200, "<p>draft page</p>")
+	request("?version=saved", 200, "<p>saved page</p>")
+	export := httptest.NewRequest("GET", "/export?format=html&version=saved", nil)
+	export.SetPathValue("id", p.ID)
+	export = export.WithContext(context.WithValue(export.Context(), ctxKey("owner"), "owner"))
+	w := httptest.NewRecorder()
+	s.export(w, export)
+	if w.Code != 200 || !strings.HasSuffix(w.Body.String(), "<p>saved page</p>") {
+		t.Fatal("HTML download did not use the same saved build as the preview", w.Code, w.Body.String())
+	}
 	_, err = db.Mutate("owner", p.ID, blobs, func(p *core.Project) error { p.Files["index.html"] = newPage; return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
-	request("", 404)
-	request("?version=saved", 200)
+	request("", 404, "")
+	request("?version=saved", 200, "<p>saved page</p>")
 }
