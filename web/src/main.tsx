@@ -3,6 +3,7 @@ import {createRoot} from 'react-dom/client';
 import App from './App';
 import {SharedView} from './components/SharedView';
 import {LoginPage} from './components/LoginPage';
+import {SiteFooter} from './components/SiteFooter';
 import {AuthProvider, useAuth} from './Auth';
 import './style.css';
 function Route() {
@@ -14,4 +15,9 @@ function Route() {
   if (!boot?.user) return <LoginPage/>;
   return <App key={`${boot.user.id}:${boot.csrf}`}/>;
 }
-createRoot(document.getElementById('root')!).render(<React.StrictMode><AuthProvider><Route/></AuthProvider></React.StrictMode>);
+createRoot(document.getElementById('root')!).render(
+  <React.StrictMode>
+    <AuthProvider><Route /></AuthProvider>
+    <SiteFooter />
+  </React.StrictMode>,
+);
